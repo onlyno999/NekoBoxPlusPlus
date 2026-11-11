@@ -69,7 +69,7 @@ jobs:
         env:
           BUILD_PLUGIN: none
           KEYSTORE_PASS: ${{ secrets.SIGNING_PASS }}
-          ALIAS_NAME: personal
+          ALIAS_NAME: nekoboxpp
           ALIAS_PASS: ${{ secrets.SIGNING_PASS }}
         run: |
           echo "sdk.dir=${ANDROID_HOME}" > local.properties
@@ -81,7 +81,7 @@ jobs:
         env:
           BUILD_PLUGIN: none
           KEYSTORE_PASS: ${{ secrets.SIGNING_PASS }}
-          ALIAS_NAME: personal
+          ALIAS_NAME: nekoboxpp
           ALIAS_PASS: ${{ secrets.SIGNING_PASS }}
         run: ./gradlew app:assemblePlayRelease
       - name: Gradle Build (preview variant)
@@ -89,7 +89,7 @@ jobs:
         env:
           BUILD_PLUGIN: none
           KEYSTORE_PASS: ${{ secrets.SIGNING_PASS }}
-          ALIAS_NAME: personal
+          ALIAS_NAME: nekoboxpp
           ALIAS_PASS: ${{ secrets.SIGNING_PASS }}
         run: ./gradlew app:assemblePreviewRelease
       - name: Publish APKs to release

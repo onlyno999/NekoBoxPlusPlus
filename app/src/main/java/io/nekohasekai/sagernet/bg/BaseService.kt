@@ -139,6 +139,10 @@ class BaseService {
             callbacks.unregister(cb)
         }
 
+        override fun resetTrafficStats() {
+            runCatching { data?.proxy?.looper?.resetStats() }
+        }
+
         override fun urlTest(): Int {
             if (data?.proxy?.box == null) {
                 error("core not started")

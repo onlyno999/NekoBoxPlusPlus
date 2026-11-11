@@ -485,6 +485,14 @@ class ConfigurationFragment @JvmOverloads constructor(
                     if (toClear.isNotEmpty()) {
                         ProfileManager.updateProfile(toClear)
                     }
+                    // The running service keeps cumulative totals in
+                    // memory and writes them back over the DB; zero
+                    // those too or the clear never takes effect.
+                    runCatching {
+                        (requireActivity() as? MainActivity)?.connection
+                            ?.service?.resetTrafficStats()
+                    }
+                    GroupManager.postReload(DataStore.currentGroupId())
                 }
             }
 

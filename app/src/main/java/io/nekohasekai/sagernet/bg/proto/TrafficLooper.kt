@@ -51,6 +51,21 @@ class TrafficLooper
         job = sc.launch { loop() }
     }
 
+    /**
+     * Zero the in-memory accumulators (the clear-statistics action).
+     * The DB alone is not enough: these totals are written back over
+     * it on the next node switch / service stop. tagMap shares the
+     * same item objects, so idMap covers everything.
+     */
+    fun resetStats() {
+        for (item in idMap.values) {
+            item.rx = 0
+            item.tx = 0
+            item.rxBase = 0
+            item.txBase = 0
+        }
+    }
+
     var selectorNowId = -114514L
     var selectorNowFakeTag = ""
 

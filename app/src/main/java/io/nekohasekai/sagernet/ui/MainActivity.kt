@@ -3,6 +3,9 @@ package io.nekohasekai.sagernet.ui
 import android.Manifest.permission.POST_NOTIFICATIONS
 import android.annotation.SuppressLint
 import android.content.Intent
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
@@ -27,6 +30,7 @@ import io.nekohasekai.sagernet.aidl.ISagerNetService
 import io.nekohasekai.sagernet.aidl.SpeedDisplayData
 import io.nekohasekai.sagernet.aidl.TrafficData
 import io.nekohasekai.sagernet.bg.BaseService
+import io.nekohasekai.sagernet.geo.GroupBalancer
 import io.nekohasekai.sagernet.bg.SagerConnection
 import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.database.GroupManager
@@ -61,6 +65,9 @@ class MainActivity : ThemedActivity(),
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        // NekoBox++: resume the load-balancer loops if a country is armed.
+        GroupBalancer.ensureLoop(this)
+
         binding = LayoutMainBinding.inflate(layoutInflater)
         binding.fab.initProgress(binding.fabProgress)
         if (themeResId !in intArrayOf(
@@ -87,9 +94,19 @@ class MainActivity : ThemedActivity(),
         }
 
         binding.fab.setOnClickListener {
-            if (DataStore.serviceState.canStop) SagerNet.stopService() else connect.launch(
-                null
-            )
+            if (DataStore.serviceState.canStop) {
+                SagerNet.stopService()
+            } else if (GroupBalancer.armedCountry(this) != null) {
+                // Auto country armed: pick from the recorded results
+                // first so the service starts on the best known node.
+                lifecycleScope.launch {
+                    snackbar("正在优选节点…").show()
+                    withTimeoutOrNull(15_000) { GroupBalancer.pickForConnect() }
+                    connect.launch(null)
+                }
+            } else {
+                connect.launch(null)
+            }
         }
         binding.stats.setOnClickListener { if (DataStore.serviceState.connected) binding.stats.testConnection() }
 

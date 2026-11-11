@@ -39,6 +39,10 @@ import com.google.android.material.tabs.TabLayoutMediator
 import io.nekohasekai.sagernet.GroupOrder
 import io.nekohasekai.sagernet.GroupType
 import io.nekohasekai.sagernet.Key
+import android.widget.Toast
+import io.nekohasekai.sagernet.geo.GeoProbe
+import io.nekohasekai.sagernet.geo.GeoStore
+import io.nekohasekai.sagernet.geo.GroupBalancer
 import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.SagerNet
 import io.nekohasekai.sagernet.aidl.TrafficData
@@ -840,7 +844,15 @@ class ConfigurationFragment @JvmOverloads constructor(
         val group = DataStore.currentGroup()
 
         val mainJob = runOnDefaultDispatcher {
-            val profilesList = SagerDatabase.proxyDao.getByGroup(group.id)
+            val allProfiles = SagerDatabase.proxyDao.getByGroup(group.id)
+            // With country sections, a manual test only covers
+            // the sections currently expanded.
+            val scope = adapter.groupFragments[group.id]?.adapter?.expandedProfileIds()
+            val profilesList = if (scope.isNullOrEmpty()) {
+                allProfiles
+            } else {
+                allProfiles.filter { it.id in scope }
+            }
             test.proxyN = profilesList.size
             val profiles = ConcurrentLinkedQueue(profilesList)
             repeat(DataStore.connectionTestConcurrent) {
@@ -888,6 +900,27 @@ class ConfigurationFragment @JvmOverloads constructor(
                 }
                 GroupManager.postReload(DataStore.currentGroupId())
                 DataStore.runningTest = false
+                // Region follow-up: detect the region of every node
+                // that answered, filing each into its country
+                // section as soon as it is known.
+                val appCtx = dialog.context.applicationContext
+                val geoTargets = test.results.filter {
+                    it.status == 1 &&
+                        GeoStore.countryFor(appCtx, it.requireBean()) == null
+                }
+                if (geoTargets.isNotEmpty()) {
+                    launch {
+                        var lastReload = 0L
+                        GeoProbe.probeProfiles(appCtx, geoTargets) {
+                            val now = System.currentTimeMillis()
+                            if (now - lastReload >= 600) {
+                                lastReload = now
+                                GroupManager.postReload(DataStore.currentGroupId())
+                            }
+                        }
+                        GroupManager.postReload(DataStore.currentGroupId())
+                    }
+                }
             }
         }
         test.minimize = {
@@ -1183,7 +1216,9 @@ class ConfigurationFragment @JvmOverloads constructor(
                     override fun getDragDirs(
                         recyclerView: RecyclerView,
                         viewHolder: RecyclerView.ViewHolder,
-                    ) = if (isEnabled) super.getDragDirs(recyclerView, viewHolder) else 0
+                    ) = if (isEnabled && adapter?.isSectioned() != true) super.getDragDirs(
+                        recyclerView, viewHolder
+                    ) else 0
 
                     override fun onSwiped(viewHolder: RecyclerView.ViewHolder, direction: Int) {
                     }
@@ -1223,7 +1258,7 @@ class ConfigurationFragment @JvmOverloads constructor(
             undoManager.flush()
         }
 
-        inner class ConfigurationAdapter : RecyclerView.Adapter<ConfigurationHolder>(),
+        inner class ConfigurationAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>(),
             ProfileManager.Listener,
             GroupManager.Listener,
             UndoSnackbarManager.Interface<ProxyEntity> {
@@ -1234,6 +1269,92 @@ class ConfigurationFragment @JvmOverloads constructor(
 
             var configurationIdList: MutableList<Long> = mutableListOf()
             val configurationList = HashMap<Long, ProxyEntity>()
+
+            // ---- NekoBox++: collapsible country sections ----
+            var geoRows: List<GeoRow> = emptyList()
+                private set
+
+            var sectioned: Boolean = false
+                private set
+
+            private var filtering = false
+
+            fun isSectioned() = sectioned
+
+            /**
+             * Profiles currently visible under expanded country
+             * sections; null when the list is not sectioned.
+             */
+            fun expandedProfileIds(): Set<Long>? {
+                if (!sectioned) return null
+                return geoRows.filterIsInstance<GeoItem>().map { it.profileId }.toSet()
+            }
+
+            private fun rebuildRows() {
+                val ctx = io.nekohasekai.sagernet.ktx.app
+                val countries = configurationIdList.map { id ->
+                    configurationList[id]?.let {
+                        GeoStore.countryFor(ctx, it.requireBean())
+                    }
+                }
+                sectioned = !select && countries.any { it != null }
+                if (!sectioned) {
+                    geoRows = configurationIdList.map { GeoItem(it) }
+                    return
+                }
+                val byCountry = LinkedHashMap<String?, MutableList<Long>>()
+                configurationIdList.forEachIndexed { index, id ->
+                    byCountry.getOrPut(countries[index]) { mutableListOf() }.add(id)
+                }
+                val known = byCountry.keys.filterNotNull().sortedWith(
+                    compareByDescending<String> { byCountry[it]!!.size }.thenBy { it }
+                )
+                val orderedKeys = mutableListOf<String?>()
+                orderedKeys.addAll(known)
+                if (byCountry.containsKey(null)) orderedKeys.add(null)
+                geoRows = buildList {
+                    for (key in orderedKeys) {
+                        val ids = byCountry[key]!!
+                        val storeKey = key ?: ""
+                        val expanded = filtering ||
+                            GeoStore.sectionExpanded(ctx, proxyGroup.id, storeKey)
+                            ?: (DataStore.selectedProxy in ids)
+                        add(
+                            GeoHeader(
+                                storeKey,
+                                if (key == null) "未检测"
+                                else GeoStore.countryTitle(key),
+                                ids.size,
+                                expanded
+                            )
+                        )
+                        if (expanded) ids.forEach { add(GeoItem(it)) }
+                    }
+                }
+            }
+
+            fun toggleSection(key: String) {
+                val headerPos = geoRows.indexOfFirst { it is GeoHeader && it.key == key }
+                if (headerPos < 0) return
+                val header = geoRows[headerPos] as GeoHeader
+                GeoStore.setSectionExpanded(
+                    io.nekohasekai.sagernet.ktx.app, proxyGroup.id, key, !header.expanded
+                )
+                rebuildRows()
+                notifyItemChanged(headerPos)
+                if (header.expanded) {
+                    notifyItemRangeRemoved(headerPos + 1, header.count)
+                } else {
+                    notifyItemRangeInserted(headerPos + 1, header.count)
+                }
+            }
+
+            private fun rowIndexOf(profileId: Long): Int =
+                if (sectioned) {
+                    geoRows.indexOfFirst { it is GeoItem && it.profileId == profileId }
+                } else {
+                    configurationIdList.indexOf(profileId)
+                }
 
             private fun getItem(profileId: Long): ProxyEntity {
                 var profile = configurationList[profileId]
@@ -1251,26 +1372,53 @@ class ConfigurationFragment @JvmOverloads constructor(
             override fun onCreateViewHolder(
                 parent: ViewGroup,
                 viewType: Int,
-            ): ConfigurationHolder {
-                return ConfigurationHolder(
-                    LayoutInflater.from(parent.context)
-                        .inflate(R.layout.layout_profile, parent, false)
-                )
+            ): RecyclerView.ViewHolder {
+                return if (viewType == 999) {
+                    GeoHeaderHolder(
+                        LayoutInflater.from(parent.context)
+                            .inflate(R.layout.layout_geo_header, parent, false)
+                    )
+                } else {
+                    ConfigurationHolder(
+                        LayoutInflater.from(parent.context)
+                            .inflate(R.layout.layout_profile, parent, false)
+                    )
+                }
+            }
+
+            override fun getItemViewType(position: Int): Int {
+                return if (sectioned && geoRows.getOrNull(position) is GeoHeader) 999 else 0
             }
 
             override fun getItemId(position: Int): Long {
+                if (sectioned) {
+                    return when (val row = geoRows[position]) {
+                        is GeoHeader -> Long.MIN_VALUE / 2 + row.key.hashCode()
+                        is GeoItem -> row.profileId
+                    }
+                }
                 return configurationIdList[position]
             }
 
-            override fun onBindViewHolder(holder: ConfigurationHolder, position: Int) {
+            override fun onBindViewHolder(holder: RecyclerView.ViewHolder, position: Int) {
+                if (sectioned) {
+                    when (val row = geoRows[position]) {
+                        is GeoHeader -> (holder as GeoHeaderHolder).bind(row)
+                        is GeoItem -> try {
+                            (holder as ConfigurationHolder).bind(getItem(row.profileId))
+                        } catch (ignored: NullPointerException) { // when group deleted
+                        }
+                    }
+                    return
+                }
                 try {
-                    holder.bind(getItemAt(position))
+                    (holder as ConfigurationHolder).bind(getItemAt(position))
                 } catch (ignored: NullPointerException) { // when group deleted
                 }
             }
 
             override fun getItemCount(): Int {
-                return configurationIdList.size
+                return if (sectioned) geoRows.size else configurationIdList.size
             }
 
             private val updated = HashSet<ProxyEntity>()
@@ -1280,6 +1428,7 @@ class ConfigurationFragment @JvmOverloads constructor(
                     reloadProfiles()
                     return
                 }
+                filtering = true
                 configurationIdList.clear()
                 val lower = name.lowercase()
                 configurationIdList.addAll(configurationList.filter {
@@ -1287,10 +1436,12 @@ class ConfigurationFragment @JvmOverloads constructor(
                             it.value.displayType().lowercase().contains(lower) ||
                             it.value.displayAddress().lowercase().contains(lower)
                 }.keys)
+                rebuildRows()
                 notifyDataSetChanged()
             }
 
             fun move(from: Int, to: Int) {
+                if (sectioned) return
                 val first = getItemAt(from)
                 var previousOrder = first.userOrder
                 val (step, range) = if (from < to) Pair(1, from until to) else Pair(
@@ -1318,7 +1469,12 @@ class ConfigurationFragment @JvmOverloads constructor(
             fun remove(pos: Int) {
                 if (pos < 0) return
                 configurationIdList.removeAt(pos)
-                notifyItemRemoved(pos)
+                if (sectioned) {
+                    rebuildRows()
+                    notifyDataSetChanged()
+                } else {
+                    notifyItemRemoved(pos)
+                }
             }
 
             override fun undo(actions: List<Pair<Int, ProxyEntity>>) {
@@ -1326,7 +1482,12 @@ class ConfigurationFragment @JvmOverloads constructor(
                     configurationListView.post {
                         configurationList[item.id] = item
                         configurationIdList.add(index, item.id)
-                        notifyItemInserted(index)
+                        if (sectioned) {
+                            rebuildRows()
+                            notifyDataSetChanged()
+                        } else {
+                            notifyItemInserted(index)
+                        }
                     }
                 }
             }
@@ -1347,16 +1508,20 @@ class ConfigurationFragment @JvmOverloads constructor(
                     if (::undoManager.isInitialized) {
                         undoManager.flush()
                     }
-                    val pos = itemCount
                     configurationList[profile.id] = profile
                     configurationIdList.add(profile.id)
-                    notifyItemInserted(pos)
+                    if (sectioned) {
+                        rebuildRows()
+                        notifyDataSetChanged()
+                    } else {
+                        notifyItemInserted(configurationIdList.size - 1)
+                    }
                 }
             }
 
             override suspend fun onUpdated(profile: ProxyEntity, noTraffic: Boolean) {
                 if (profile.groupId != proxyGroup.id) return
-                val index = configurationIdList.indexOf(profile.id)
+                val index = rowIndexOf(profile.id)
                 if (index < 0) return
                 configurationListView.post {
                     if (::undoManager.isInitialized) {
@@ -1382,10 +1547,10 @@ class ConfigurationFragment @JvmOverloads constructor(
 
             override suspend fun onUpdated(data: TrafficData) {
                 try {
-                    val index = configurationIdList.indexOf(data.id)
+                    val index = rowIndexOf(data.id)
                     if (index != -1) {
                         val holder = layoutManager.findViewByPosition(index)
-                            ?.let { configurationListView.getChildViewHolder(it) } as ConfigurationHolder?
+                            ?.let { configurationListView.getChildViewHolder(it) } as? ConfigurationHolder
                         if (holder != null) {
                             onMainDispatcher {
                                 holder.bind(holder.entity, data)
@@ -1405,7 +1570,12 @@ class ConfigurationFragment @JvmOverloads constructor(
                 configurationListView.post {
                     configurationIdList.removeAt(index)
                     configurationList.remove(profileId)
-                    notifyItemRemoved(index)
+                    if (sectioned) {
+                        rebuildRows()
+                        notifyDataSetChanged()
+                    } else {
+                        notifyItemRemoved(index)
+                    }
                 }
             }
 
@@ -1425,6 +1595,7 @@ class ConfigurationFragment @JvmOverloads constructor(
             }
 
             fun reloadProfiles() {
+                filtering = false
                 var newProfiles = SagerDatabase.proxyDao.getByGroup(proxyGroup.id)
                 when (proxyGroup.order) {
                     GroupOrder.BY_NAME -> {
@@ -1452,10 +1623,19 @@ class ConfigurationFragment @JvmOverloads constructor(
                 configurationListView.post {
                     configurationIdList.clear()
                     configurationIdList.addAll(newProfileIds)
+                    rebuildRows()
                     notifyDataSetChanged()
 
                     if (selectedProfileIndex != -1) {
-                        configurationListView.scrollTo(selectedProfileIndex, true)
+                        val scrollIndex = if (sectioned) {
+                            val targetId = newProfileIds[selectedProfileIndex]
+                            geoRows.indexOfFirst { it is GeoItem && it.profileId == targetId }
+                        } else {
+                            selectedProfileIndex
+                        }
+                        if (scrollIndex >= 0) {
+                            configurationListView.scrollTo(scrollIndex, true)
+                        }
                     } else if (newProfiles.isNotEmpty()) {
                         configurationListView.scrollTo(0, true)
                     }
@@ -1467,6 +1647,38 @@ class ConfigurationFragment @JvmOverloads constructor(
 
         val profileAccess = Mutex()
         val reloadAccess = Mutex()
+
+        inner class GeoHeaderHolder(val view: View) : RecyclerView.ViewHolder(view) {
+            val titleText: TextView = view.findViewById(R.id.geo_header_title)
+            val lbText: TextView = view.findViewById(R.id.geo_header_lb)
+            val arrowText: TextView = view.findViewById(R.id.geo_header_arrow)
+
+            fun bind(header: GeoHeader) {
+                titleText.text = "${header.title} · ${header.count}"
+                arrowText.text = if (header.expanded) "▾" else "▸"
+                view.setOnClickListener {
+                    adapter?.toggleSection(header.key)
+                }
+                if (header.key.isEmpty()) {
+                    lbText.visibility = View.GONE
+                    return
+                }
+                lbText.visibility = View.VISIBLE
+                val active = GroupBalancer
+                    .activeCountry(view.context, proxyGroup.id) == header.key
+                lbText.text = if (active) "自动中" else "自动"
+                lbText.setTextColor(
+                    if (active) 0xFF2E9E4F.toInt() else 0xFF777777.toInt()
+                )
+                lbText.setTypeface(null, if (active) android.graphics.Typeface.BOLD else android.graphics.Typeface.NORMAL)
+                lbText.setOnClickListener {
+                    GroupBalancer.setActive(
+                        view.context, proxyGroup.id, if (active) null else header.key
+                    )
+                    adapter?.notifyDataSetChanged()
+                }
+            }
+        }
 
         inner class ConfigurationHolder(val view: View) : RecyclerView.ViewHolder(view),
             PopupMenu.OnMenuItemClickListener {
@@ -1497,6 +1709,22 @@ class ConfigurationFragment @JvmOverloads constructor(
                     }
                 } else {
                     view.setOnClickListener {
+                        // Auto country armed for this group: nodes in
+                        // the auto section belong to the balancer.
+                        // Manual selection requires turning auto off.
+                        GroupBalancer.activeCountry(view.context, proxyGroup.id)?.let { cc ->
+                            if (GeoStore.countryFor(
+                                    view.context, proxyEntity.requireBean()
+                                ) == cc
+                            ) {
+                                Toast.makeText(
+                                    view.context,
+                                    "自动中：先关掉自动才能手动选节点",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                                return@setOnClickListener
+                            }
+                        }
                         runOnDefaultDispatcher {
                             var update: Boolean
                             var lastSelected: Long
@@ -1522,13 +1750,39 @@ class ConfigurationFragment @JvmOverloads constructor(
                                     SagerNet.startService()
                                 }
                             }
+
+                            // A manually picked node gets its region
+                            // detected right away, so it files into
+                            // its country section.
+                            if (GeoStore.countryFor(
+                                    view.context, proxyEntity.requireBean()
+                                ) == null
+                            ) {
+                                GeoProbe.probeProfiles(
+                                    view.context, listOf(proxyEntity)
+                                )
+                                GroupManager.postReload(proxyEntity.groupId)
+                            }
                         }
 
                     }
                 }
 
-                profileName.text = proxyEntity.displayName()
-                profileType.text = proxyEntity.displayType()
+                // NekoBox++: show the probed exit country on the card.
+                val nbCountry = GeoStore.countryFor(
+                    view.context, proxyEntity.requireBean()
+                )
+                profileName.text = if (nbCountry != null) {
+                    GeoStore.flag(nbCountry) +
+                        " " + proxyEntity.displayName()
+                } else {
+                    proxyEntity.displayName()
+                }
+                profileType.text = if (nbCountry != null) {
+                    proxyEntity.displayType() + " · " + nbCountry
+                } else {
+                    proxyEntity.displayType()
+                }
                 profileType.setTextColor(requireContext().getProtocolColor(proxyEntity.type))
 
                 var rx = proxyEntity.rx

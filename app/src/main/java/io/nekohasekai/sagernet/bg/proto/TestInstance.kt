@@ -40,6 +40,31 @@ class TestInstance(profile: ProxyEntity, val link: String, private val timeout: 
         }
     }
 
+    // NekoBox999: fetch a URL's body through this profile's box (geo probing).
+    suspend fun doFetch(): String {
+        return suspendCoroutine { c ->
+            processes = GuardedProcessPool {
+                Logs.w(it)
+                c.tryResumeWithException(it)
+            }
+            runOnDefaultDispatcher {
+                use {
+                    try {
+                        init()
+                        launch()
+                        if (processes.processCount > 0) {
+                            // wait for plugin start
+                            delay(500)
+                        }
+                        c.tryResume(Libcore.urlFetch(box, link, timeout))
+                    } catch (e: Exception) {
+                        c.tryResumeWithException(e)
+                    }
+                }
+            }
+        }
+    }
+
     override fun buildConfig() {
         config = buildConfig(profile, true)
     }

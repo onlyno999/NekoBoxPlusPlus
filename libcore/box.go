@@ -9,7 +9,9 @@ import (
 	"log"
 	"runtime"
 	"runtime/debug"
+	"net/http"
 	"strings"
+	"time"
 	"sync"
 
 	"github.com/matsuridayo/libneko/protect_server"
@@ -211,6 +213,42 @@ func (b *BoxInstance) SelectOutbound(tag string) bool {
 		return b.selector.SelectOutbound(tag)
 	}
 	return false
+}
+
+// UrlFetch performs an HTTP GET through the given box instance (its
+// default outbound) and returns the response body as a string. Added
+// for NekoBox999 per-node geo/region probing.
+func UrlFetch(i *BoxInstance, link string, timeout int32) (body string, err error) {
+	defer device.DeferPanicToError("box.UrlFetch", func(err_ error) { err = err_ })
+	var connectionTracker adapter.ConnectionTracker
+	instance := i
+	if instance == nil {
+		instance = mainInstance
+	}
+	var b *box.Box
+	if instance != nil {
+		b = instance.Box
+		if instance.v2api != nil {
+			connectionTracker = instance.v2api.StatsService()
+		}
+	}
+	client := boxapi.CreateProxyHttpClient(b, connectionTracker)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeout)*time.Millisecond)
+	defer cancel()
+	req, reqErr := http.NewRequestWithContext(ctx, http.MethodGet, link, nil)
+	if reqErr != nil {
+		return "", reqErr
+	}
+	resp, doErr := client.Do(req)
+	if doErr != nil {
+		return "", doErr
+	}
+	defer resp.Body.Close()
+	data, readErr := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if readErr != nil {
+		return "", readErr
+	}
+	return string(data), nil
 }
 
 func UrlTest(i *BoxInstance, link string, timeout int32) (latency int32, err error) {

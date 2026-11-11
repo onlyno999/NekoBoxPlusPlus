@@ -485,6 +485,7 @@ fun buildConfig(
         }
 
         // NekoBox++: urltest outbounds for rules pointing at an LB country.
+        val lbTags = mutableSetOf<String>()
         if (!forTest) {
             val lbRefs = extraRules.map { it.outbound }
                 .filter { io.nekohasekai.sagernet.geo.LbRef.isLb(it) }
@@ -493,6 +494,7 @@ fun buildConfig(
                 val memberTags = io.nekohasekai.sagernet.geo.LbRef.memberIds(ref)
                     .mapNotNull { tagMap[it] }
                 if (memberTags.isNotEmpty()) {
+                    lbTags.add(io.nekohasekai.sagernet.geo.LbRef.tagFor(ref))
                     outbounds.add(Outbound_URLTestOptions().apply {
                         type = "urltest"
                         tag = io.nekohasekai.sagernet.geo.LbRef.tagFor(ref)
@@ -605,7 +607,7 @@ fun buildConfig(
                     -2L -> TAG_BLOCK
                     else -> if (io.nekohasekai.sagernet.geo.LbRef.isLb(outId)) {
                         val lbTag = io.nekohasekai.sagernet.geo.LbRef.tagFor(outId)
-                        if (outbounds.any { it.tag == lbTag }) lbTag else TAG_PROXY
+                        if (lbTag in lbTags) lbTag else TAG_PROXY
                     } else if (outId == proxy.id) {
                         TAG_PROXY
                     } else {

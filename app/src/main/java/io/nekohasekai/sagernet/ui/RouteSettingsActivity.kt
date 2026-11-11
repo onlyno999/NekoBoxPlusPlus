@@ -184,9 +184,7 @@ class RouteSettingsActivity(
             val lbEncoded = lbValueToEncoded[v]
             if (lbEncoded != null) {
                 DataStore.routeOutboundRule = lbEncoded
-                onMainDispatcher {
-                    outbound.value = "3"
-                }
+                outbound.value = "3"
                 false
             } else if (v == "3") {
                 selectProfileForAdd.launch(

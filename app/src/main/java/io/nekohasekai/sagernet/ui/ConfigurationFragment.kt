@@ -129,6 +129,9 @@ class ConfigurationFragment @JvmOverloads constructor(
 
     interface SelectCallback {
         fun returnProfile(profileId: Long)
+
+        /** Route picker: a country section's load balancer was chosen. */
+        fun returnLbOutbound(encoded: Long) {}
     }
 
     lateinit var adapter: GroupPagerAdapter
@@ -1679,10 +1682,23 @@ class ConfigurationFragment @JvmOverloads constructor(
                 )
                 lbText.setTypeface(null, if (active) android.graphics.Typeface.BOLD else android.graphics.Typeface.NORMAL)
                 lbText.setOnClickListener {
-                    GroupBalancer.setActive(
-                        view.context, proxyGroup.id, if (active) null else header.key
-                    )
-                    adapter?.notifyDataSetChanged()
+                    if (select) {
+                        // Route-rule picker: choosing this country binds
+                        // the rule to its load balancer and turns the
+                        // balancer on for it (never disarms here).
+                        GroupBalancer.setActive(view.context, proxyGroup.id, header.key)
+                        val frag = parentFragment as? ConfigurationFragment
+                        (frag?.requireActivity() as? SelectCallback)
+                            ?.returnLbOutbound(
+                                io.nekohasekai.sagernet.geo.LbRef
+                                    .encode(proxyGroup.id, header.key)
+                            )
+                    } else {
+                        GroupBalancer.setActive(
+                            view.context, proxyGroup.id, if (active) null else header.key
+                        )
+                        adapter?.notifyDataSetChanged()
+                    }
                 }
             }
         }

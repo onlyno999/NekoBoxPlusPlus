@@ -11,6 +11,7 @@ class ProfileSelectActivity : ThemedActivity(R.layout.layout_empty),
     companion object {
         const val EXTRA_SELECTED = "selected"
         const val EXTRA_PROFILE_ID = "id"
+        const val EXTRA_LB_OUTBOUND = "lb_outbound"
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -29,6 +30,13 @@ class ProfileSelectActivity : ThemedActivity(R.layout.layout_empty),
     override fun returnProfile(profileId: Long) {
         setResult(RESULT_OK, Intent().apply {
             putExtra(EXTRA_PROFILE_ID, profileId)
+        })
+        finish()
+    }
+
+    override fun returnLbOutbound(encoded: Long) {
+        setResult(RESULT_OK, Intent().apply {
+            putExtra(EXTRA_LB_OUTBOUND, encoded)
         })
         finish()
     }

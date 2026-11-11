@@ -125,15 +125,23 @@ class RouteSettingsActivity(
     val selectProfileForAdd = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { (resultCode, data) ->
-        if (resultCode == Activity.RESULT_OK) runOnDefaultDispatcher {
-            val profile = ProfileManager.getProfile(
-                data!!.getLongExtra(
-                    ProfileSelectActivity.EXTRA_PROFILE_ID, 0
-                )
-            ) ?: return@runOnDefaultDispatcher
-            DataStore.routeOutboundRule = profile.id
-            onMainDispatcher {
+        if (resultCode == Activity.RESULT_OK && data != null) {
+            if (data.hasExtra(ProfileSelectActivity.EXTRA_LB_OUTBOUND)) {
+                DataStore.routeOutboundRule =
+                    data.getLongExtra(ProfileSelectActivity.EXTRA_LB_OUTBOUND, 0)
                 outbound.value = "3"
+                return@registerForActivityResult
+            }
+            runOnDefaultDispatcher {
+                val profile = ProfileManager.getProfile(
+                    data.getLongExtra(
+                        ProfileSelectActivity.EXTRA_PROFILE_ID, 0
+                    )
+                ) ?: return@runOnDefaultDispatcher
+                DataStore.routeOutboundRule = profile.id
+                onMainDispatcher {
+                    outbound.value = "3"
+                }
             }
         }
     }
@@ -147,46 +155,15 @@ class RouteSettingsActivity(
     lateinit var outbound: OutboundPreference
     lateinit var apps: AppListPreference
 
-    // NekoBox++: preference value ("10", "11", ...) -> LB encoded outbound.
-    val lbValueToEncoded = mutableMapOf<String, Long>()
-
     fun PreferenceFragmentCompat.viewCreated(view: View, savedInstanceState: Bundle?) {
         outbound = findPreference(Key.ROUTE_OUTBOUND)!!
         apps = findPreference(Key.ROUTE_PACKAGES)!!
 
-        // NekoBox++: offer every probed LB country as a route outbound.
-        runOnDefaultDispatcher {
-            val options = io.nekohasekai.sagernet.geo.LbRef.collectOptions(app)
-            if (options.isNotEmpty()) {
-                onMainDispatcher {
-                    val entries = resources.getStringArray(R.array.outbound_entry)
-                        .toMutableList()
-                    val values = resources.getStringArray(R.array.outbound_value)
-                        .toMutableList()
-                    options.forEachIndexed { index, opt ->
-                        entries.add(
-                            "负载均衡 · " + opt.group.displayName() + " · " +
-                                io.nekohasekai.sagernet.geo.GeoStore
-                                    .countryTitle(opt.countryCode)
-                        )
-                        val v = (10 + index).toString()
-                        values.add(v)
-                        lbValueToEncoded[v] = opt.encoded
-                    }
-                    outbound.setEntries(entries.toTypedArray())
-                    outbound.setEntryValues(values.toTypedArray())
-                }
-            }
-        }
-
+        // Stock outbound entries only （代理/绕过/屏蔽/选择配置）: picking
+        // 选择配置 opens the profile picker, where a country section's
+        // 自动 button binds this rule to that country's load balancer.
         outbound.setOnPreferenceChangeListener { _, newValue ->
-            val v = newValue.toString()
-            val lbEncoded = lbValueToEncoded[v]
-            if (lbEncoded != null) {
-                DataStore.routeOutboundRule = lbEncoded
-                outbound.value = "3"
-                false
-            } else if (v == "3") {
+            if (newValue.toString() == "3") {
                 selectProfileForAdd.launch(
                     Intent(
                         this@RouteSettingsActivity, ProfileSelectActivity::class.java

@@ -32,6 +32,7 @@ abstract class StandardV2RaySettingsActivity : ProfileSettingsActivity<StandardV
     private val type = pbm.add(PreferenceBinding(Type.Text, "type"))
     private val host = pbm.add(PreferenceBinding(Type.Text, "host"))
     private val path = pbm.add(PreferenceBinding(Type.Text, "path"))
+    private val xhttpMode = pbm.add(PreferenceBinding(Type.Text, "xhttpMode"))
     private val packetEncoding = pbm.add(PreferenceBinding(Type.TextToInt, "packetEncoding"))
     private val wsMaxEarlyData = pbm.add(PreferenceBinding(Type.TextToInt, "wsMaxEarlyData"))
     private val earlyDataHeaderName = pbm.add(PreferenceBinding(Type.Text, "earlyDataHeaderName"))
@@ -149,6 +150,7 @@ abstract class StandardV2RaySettingsActivity : ProfileSettingsActivity<StandardV
     private fun updateView(network: String) {
         host.preference.isVisible = false
         path.preference.isVisible = false
+        xhttpMode.preference.isVisible = false
         wsCategory.isVisible = false
 
         when (network) {
@@ -182,6 +184,14 @@ abstract class StandardV2RaySettingsActivity : ProfileSettingsActivity<StandardV
                 path.preference.setTitle(R.string.http_upgrade_path)
                 host.preference.isVisible = true
                 path.preference.isVisible = true
+            }
+
+            "xhttp" -> {
+                host.preference.setTitle(R.string.http_upgrade_host)
+                path.preference.setTitle(R.string.http_upgrade_path)
+                host.preference.isVisible = true
+                path.preference.isVisible = true
+                xhttpMode.preference.isVisible = true
             }
         }
     }

@@ -977,7 +977,7 @@ class ConfigurationFragment @JvmOverloads constructor(
                         groupList = newGroupList
                         notifyDataSetChanged()
                         if (set) groupPager.setCurrentItem(selectedGroupIndex, false)
-                        val hideTab = groupList.size < 2
+                        val hideTab = false // NekoBox++: always show the group tab bar
                         tabLayout.isGone = hideTab
                         toolbar.elevation = if (hideTab) 0F else dp2px(4).toFloat()
                         if (!select) {

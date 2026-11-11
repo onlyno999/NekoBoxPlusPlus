@@ -122,6 +122,74 @@ class BackupFragment : NamedFragment(R.layout.layout_backup) {
         binding.actionImportFile.setOnClickListener {
             startFilesForResult(importFile, "*/*")
         }
+
+        // NekoBox++: WebDAV backup upload / download.
+        val webdavPrefs = requireContext().getSharedPreferences(
+            "nbpp_webdav", android.content.Context.MODE_PRIVATE
+        )
+        binding.webdavUrl.setText(webdavPrefs.getString("url", ""))
+        binding.webdavUser.setText(webdavPrefs.getString("user", ""))
+        binding.webdavPass.setText(webdavPrefs.getString("pass", ""))
+
+        fun webdavTarget(): String? {
+            val raw = binding.webdavUrl.text.toString().trim()
+            if (raw.isBlank()) return null
+            webdavPrefs.edit()
+                .putString("url", raw)
+                .putString("user", binding.webdavUser.text.toString())
+                .putString("pass", binding.webdavPass.text.toString())
+                .apply()
+            return if (raw.endsWith("/")) raw + "nekoboxpp_backup.json" else raw
+        }
+
+        binding.actionWebdavUpload.setOnClickListener {
+            val target = webdavTarget()
+            if (target == null) {
+                snackbar("先填 WebDAV 地址").show()
+                return@setOnClickListener
+            }
+            val user = binding.webdavUser.text.toString()
+            val pass = binding.webdavPass.text.toString()
+            runOnDefaultDispatcher {
+                try {
+                    val data = doBackup(
+                        binding.backupConfigurations.isChecked,
+                        binding.backupRules.isChecked,
+                        binding.backupSettings.isChecked
+                    )
+                    WebDavBackup.put(target, user, pass, data)
+                    onMainDispatcher {
+                        snackbar("WebDAV 上传完成").show()
+                    }
+                } catch (e: Exception) {
+                    Logs.w(e)
+                    onMainDispatcher {
+                        snackbar("WebDAV 上传失败：" + e.readableMessage).show()
+                    }
+                }
+            }
+        }
+
+        binding.actionWebdavDownload.setOnClickListener {
+            val target = webdavTarget()
+            if (target == null) {
+                snackbar("先填 WebDAV 地址").show()
+                return@setOnClickListener
+            }
+            val user = binding.webdavUser.text.toString()
+            val pass = binding.webdavPass.text.toString()
+            runOnDefaultDispatcher {
+                try {
+                    val raw = WebDavBackup.get(target, user, pass)
+                    importFromRaw(raw)
+                } catch (e: Exception) {
+                    Logs.w(e)
+                    onMainDispatcher {
+                        snackbar("WebDAV 下载失败：" + e.readableMessage).show()
+                    }
+                }
+            }
+        }
     }
 
     fun Parcelable.toBase64Str(): String {
@@ -214,6 +282,30 @@ class BackupFragment : NamedFragment(R.layout.layout_backup) {
             return
         }
 
+        confirmImport(content)
+    }
+
+    suspend fun importFromRaw(raw: String) {
+        val content = try {
+            JSONObject(raw)
+        } catch (e: Exception) {
+            Logs.w(e)
+            onMainDispatcher {
+                snackbar(getString(R.string.invalid_backup_file)).show()
+            }
+            return
+        }
+        val version = content.optInt("version", 0)
+        if (version < 1 || version > 1) {
+            onMainDispatcher {
+                snackbar(getString(R.string.invalid_backup_file)).show()
+            }
+            return
+        }
+        confirmImport(content)
+    }
+
+    suspend fun confirmImport(content: JSONObject) {
         onMainDispatcher {
             val import = LayoutImportBinding.inflate(layoutInflater)
             if (!content.has("profiles")) {

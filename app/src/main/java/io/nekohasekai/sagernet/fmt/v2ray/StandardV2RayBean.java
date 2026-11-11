@@ -45,6 +45,7 @@ public abstract class StandardV2RayBean extends AbstractBean {
 
     public Integer wsMaxEarlyData;
     public String earlyDataHeaderName;
+    public String xhttpMode;
 
     public String certificates;
 
@@ -92,6 +93,7 @@ public abstract class StandardV2RayBean extends AbstractBean {
 
         if (JavaUtil.isNullOrBlank(certificates)) certificates = "";
         if (JavaUtil.isNullOrBlank(earlyDataHeaderName)) earlyDataHeaderName = "";
+        if (JavaUtil.isNullOrBlank(xhttpMode)) xhttpMode = "";
         if (JavaUtil.isNullOrBlank(utlsFingerprint)) utlsFingerprint = "";
 
         if (wsMaxEarlyData == null) wsMaxEarlyData = 0;
@@ -112,7 +114,7 @@ public abstract class StandardV2RayBean extends AbstractBean {
 
     @Override
     public void serialize(ByteBufferOutput output) {
-        output.writeInt(4);
+        output.writeInt(5);
         super.serialize(output);
         output.writeString(uuid);
         output.writeString(encryption);
@@ -137,6 +139,12 @@ public abstract class StandardV2RayBean extends AbstractBean {
             case "httpupgrade": {
                 output.writeString(host);
                 output.writeString(path);
+                break;
+            }
+            case "xhttp": {
+                output.writeString(host);
+                output.writeString(path);
+                output.writeString(xhttpMode);
                 break;
             }
             case "grpc": {
@@ -194,6 +202,14 @@ public abstract class StandardV2RayBean extends AbstractBean {
             case "httpupgrade": {
                 host = input.readString();
                 path = input.readString();
+                break;
+            }
+            case "xhttp": {
+                host = input.readString();
+                path = input.readString();
+                if (version >= 5) {
+                    xhttpMode = input.readString();
+                }
                 break;
             }
             case "grpc": {

@@ -126,6 +126,19 @@ fun parseV2Ray(link: String): StandardV2RayBean {
                     bean.host = it
                 }
             }
+
+            "xhttp", "splithttp" -> {
+                bean.type = "xhttp"
+                url.queryParameter("path")?.let {
+                    bean.path = it
+                }
+                url.queryParameter("host")?.let {
+                    bean.host = it
+                }
+                url.queryParameter("mode")?.let {
+                    bean.xhttpMode = it
+                }
+            }
         }
     } else {
         // also vless format
@@ -225,6 +238,19 @@ fun StandardV2RayBean.parseDuckSoft(url: HttpUrl) {
             }
             url.queryParameter("path")?.let {
                 path = it
+            }
+        }
+
+        "xhttp", "splithttp" -> {
+            type = "xhttp"
+            url.queryParameter("host")?.let {
+                host = it
+            }
+            url.queryParameter("path")?.let {
+                path = it
+            }
+            url.queryParameter("mode")?.let {
+                xhttpMode = it
             }
         }
     }
@@ -448,7 +474,7 @@ fun StandardV2RayBean.toUriVMessVLESSTrojan(isTrojan: Boolean): String {
 
     when (type) {
         "tcp" -> {}
-        "ws", "http", "httpupgrade" -> {
+        "ws", "http", "httpupgrade", "xhttp" -> {
             if (host.isNotBlank()) {
                 builder.addQueryParameter("host", host)
             }
@@ -465,6 +491,9 @@ fun StandardV2RayBean.toUriVMessVLESSTrojan(isTrojan: Boolean): String {
             } else if (type == "http" && !isTLS()) {
                 builder.setQueryParameter("type", "tcp")
                 builder.addQueryParameter("headerType", "http")
+            }
+            if (type == "xhttp" && xhttpMode.isNotBlank()) {
+                builder.addQueryParameter("mode", xhttpMode)
             }
         }
 
@@ -582,6 +611,15 @@ fun buildSingBoxOutboundStreamSettings(bean: StandardV2RayBean): V2RayTransportO
                 type = "httpupgrade"
                 host = bean.host
                 path = bean.path
+            }
+        }
+
+        "xhttp" -> {
+            return V2RayTransportOptions_XHTTPOptions().apply {
+                type = "xhttp"
+                host = bean.host
+                path = bean.path
+                mode = bean.xhttpMode
             }
         }
     }

@@ -69,6 +69,11 @@
             app:key="path"
             app:title="@string/http_path"
             app:useSimpleSummaryProvider="true" />
+        <EditTextPreference
+            app:icon="@drawable/ic_baseline_compare_arrows_24"
+            app:key="xhttpMode"
+            app:title="XHTTP 模式（auto / packet-up / stream-up / stream-one）"
+            app:useSimpleSummaryProvider="true" />
         <moe.matsuri.nb4a.ui.SimpleMenuPreference
             app:entries="@array/transport_layer_encryption_value"
             app:entryValues="@array/transport_layer_encryption_value"

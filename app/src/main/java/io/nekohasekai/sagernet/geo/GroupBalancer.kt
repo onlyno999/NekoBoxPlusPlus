@@ -23,22 +23,23 @@ import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * Load balancing for NekoBox++: every country section of every
- * group can be marked "auto" independently — any number of
- * (group, country) pools can be armed at once and they do not
- * affect each other. An armed pool keeps its members speed-tested
- * (rounds every 10 minutes, region sweeps of its group every 30).
- * While the main connection rides a member of an armed pool, the
- * pool keeps it on the fastest member: rounds steer within the
- * pool, and a 30-second watchdog swaps instantly from the recorded
- * results when the node in use dies twice in a row. Route-rule
- * load balancing is separate: those pools live in the generated
- * config as urltest outbounds and never touch this state.
+ * Load balancing for NekoBox++ (front page). Rule since 1.2.1:
+ * exactly ONE (group, country) pool can be lit ("自动中") across
+ * the whole front page — lighting another one replaces it — and
+ * the lit pool IS the general line: arming it steers the main
+ * connection into the pool right away, its speed rounds (every
+ * 10 minutes, region sweeps of its group every 30) keep the main
+ * connection on the pool's fastest member, and a 30-second
+ * watchdog fails over into the pool when the node in use dies
+ * twice in a row. Route-rule load balancing is separate: those
+ * pools live in the generated config as urltest outbounds and
+ * never touch this state.
  */
 object GroupBalancer {
 
     private const val TAG = "GrpLB"
     private const val PREFS = "nbpp_lb"
+    private const val KEY_ARMED = "lb_armed"
     private const val KEY_SET = "lb_armed_set"
     private const val KEY_LOCK = "lb_lock"
     private const val KEY_COUNTRY = "lb_country"
@@ -69,55 +70,66 @@ object GroupBalancer {
     private fun keyOf(groupId: Long, countryCode: String) =
         "$groupId|${countryCode.uppercase()}"
 
+    private fun parsePair(raw: String?): Pair<Long, String>? {
+        if (raw == null) return null
+        val parts = raw.split("|")
+        val gid = parts.getOrNull(0)?.toLongOrNull() ?: return null
+        val cc = parts.getOrNull(1)?.takeIf { it.length == 2 } ?: return null
+        return gid to cc
+    }
+
     /**
-     * All armed (group, country) pools. Migrates the legacy
-     * single-pair keys (pre-v1.11) on first read.
+     * The one lit pool, or null. Migrates the pre-1.2.1 state on
+     * first read: a locked pool wins, then the first pool of the
+     * old multi-arm set, then the legacy single-pair keys.
      */
-    fun armedPairs(context: Context): Set<Pair<Long, String>> {
+    fun armedPair(context: Context): Pair<Long, String>? {
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        val raw = prefs.getStringSet(KEY_SET, null)
-        if (raw == null) {
-            val legacyCc = prefs.getString(KEY_COUNTRY, null)
-                ?.takeIf { it.isNotBlank() }
-            val legacyGid = prefs.getLong(KEY_GROUP, -1L).takeIf { it >= 0 }
-            if (legacyCc != null && legacyGid != null) {
-                return setOf(legacyGid to legacyCc.uppercase())
+        parsePair(prefs.getString(KEY_ARMED, null))?.let { return it }
+        val migrated = parsePair(prefs.getString(KEY_LOCK, null))
+            ?: prefs.getStringSet(KEY_SET, null)?.let { set ->
+                set.mapNotNull { parsePair(it) }
+                    .sortedBy { keyOf(it.first, it.second) }
+                    .firstOrNull()
             }
-            return emptySet()
+            ?: run {
+                val cc = prefs.getString(KEY_COUNTRY, null)?.takeIf { it.isNotBlank() }
+                val gid = prefs.getLong(KEY_GROUP, -1L).takeIf { it >= 0 }
+                if (cc != null && gid != null) gid to cc.uppercase() else null
+            }
+        if (migrated != null) {
+            prefs.edit()
+                .putString(KEY_ARMED, keyOf(migrated.first, migrated.second))
+                .remove(KEY_SET).remove(KEY_LOCK)
+                .remove(KEY_COUNTRY).remove(KEY_GROUP)
+                .apply()
         }
-        return raw.mapNotNull { entry ->
-            val parts = entry.split("|")
-            val gid = parts.getOrNull(0)?.toLongOrNull() ?: return@mapNotNull null
-            val cc = parts.getOrNull(1)?.takeIf { it.length == 2 }
-                ?: return@mapNotNull null
-            gid to cc
-        }.toSet()
+        return migrated
     }
 
     fun isArmed(context: Context, groupId: Long, countryCode: String): Boolean =
-        armedPairs(context).any {
-            it.first == groupId && it.second == countryCode.uppercase()
-        }
+        armedPair(context) == (groupId to countryCode.uppercase())
 
-    /** Toggle one pool. Other pools are never affected. */
+    /**
+     * Light or unlight a pool. Lighting one pool replaces any
+     * other lit pool anywhere (front-page rule) and immediately
+     * runs a round that steers the main connection into it.
+     */
     fun setArmed(context: Context, groupId: Long, countryCode: String, on: Boolean) {
-        val pairs = armedPairs(context).toMutableSet()
         val pair = groupId to countryCode.uppercase()
-        if (on) pairs.add(pair) else pairs.remove(pair)
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().apply {
-            putStringSet(KEY_SET, pairs.map { keyOf(it.first, it.second) }.toSet())
-            remove(KEY_COUNTRY)
-            remove(KEY_GROUP)
-            if (!on && lockedPair(context) == pair) remove(KEY_LOCK)
-        }.apply()
-        if (pairs.isEmpty()) {
-            stopLoops()
-        } else if (on) {
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        if (on) {
+            prefs.edit().putString(KEY_ARMED, keyOf(pair.first, pair.second)).apply()
             ensureLoop(context)
             scope.launch {
                 runRegionSweep()
-                runSpeedRoundFor(groupId, countryCode.uppercase())
+                runSpeedRoundFor(pair.first, pair.second)
             }
+        } else {
+            if (armedPair(context) == pair) {
+                prefs.edit().remove(KEY_ARMED).apply()
+            }
+            if (armedPair(context) == null) stopLoops()
         }
     }
 
@@ -128,39 +140,9 @@ object GroupBalancer {
         watchdogFails = 0
     }
 
-    /**
-     * The locked pool is the general line: traffic that no route
-     * rule claims rides it. At most one pool is locked at a time;
-     * locking another section moves the lock. Locking also arms
-     * the pool (the general line must be maintained).
-     */
-    fun lockedPair(context: Context): Pair<Long, String>? {
-        val raw = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .getString(KEY_LOCK, null) ?: return null
-        val parts = raw.split("|")
-        val gid = parts.getOrNull(0)?.toLongOrNull() ?: return null
-        val cc = parts.getOrNull(1)?.takeIf { it.length == 2 } ?: return null
-        return gid to cc
-    }
-
-    fun setLocked(context: Context, groupId: Long, countryCode: String, on: Boolean) {
-        val pair = groupId to countryCode.uppercase()
-        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        if (on) {
-            prefs.edit().putString(KEY_LOCK, keyOf(pair.first, pair.second)).apply()
-            if (!isArmed(context, groupId, countryCode)) {
-                setArmed(context, groupId, countryCode, true)
-            } else {
-                scope.launch { runSpeedRoundFor(pair.first, pair.second) }
-            }
-        } else if (lockedPair(context) == pair) {
-            prefs.edit().remove(KEY_LOCK).apply()
-        }
-    }
-
-    /** Start the periodic loops if any pool is armed. */
+    /** Start the periodic loops if a pool is lit. */
     fun ensureLoop(context: Context) {
-        if (armedPairs(context).isEmpty()) return
+        if (armedPair(context) == null) return
         if (speedJob?.isActive != true) {
             speedJob = scope.launch {
                 while (isActive) {
@@ -195,7 +177,7 @@ object GroupBalancer {
      */
     private suspend fun watchdogTick() {
         if (!DataStore.serviceState.connected) return
-        if (armedPairs(app).isEmpty()) return
+        val armed = armedPair(app) ?: return
         if (roundRunning.get()) return
         val selected = withContext(Dispatchers.IO) {
             SagerDatabase.proxyDao.getById(DataStore.selectedProxy)
@@ -208,20 +190,11 @@ object GroupBalancer {
             if (watchdogFails >= 2) {
                 watchdogFails = 0
                 // Swap FIRST, from the recorded results, like a native
-                // urltest group does — but only inside the dead node's
-                // own pool, and only when that pool is armed.
-                val cc = GeoStore.countryFor(app, selected.requireBean())
-                if (cc != null && isArmed(app, selected.groupId, cc)) {
-                    failOverFromRecord(selected.groupId, cc, selected.id)
-                    scope.launch { runSpeedRoundFor(selected.groupId, cc) }
-                } else {
-                    // The dead node belongs to no armed pool: the
-                    // general line takes over if one is locked.
-                    lockedPair(app)?.let { (gid, lcc) ->
-                        failOverFromRecord(gid, lcc, selected.id)
-                        scope.launch { runSpeedRoundFor(gid, lcc) }
-                    }
-                }
+                // urltest group does. The lit pool is the general
+                // line, so it takes over no matter where the dead
+                // node lived.
+                failOverFromRecord(armed.first, armed.second, selected.id)
+                scope.launch { runSpeedRoundFor(armed.first, armed.second) }
             }
         }
     }
@@ -270,9 +243,7 @@ object GroupBalancer {
     suspend fun runRegionSweep() {
         if (!sweepRunning.compareAndSet(false, true)) return
         try {
-            for (groupId in armedPairs(app).map { it.first }.distinct()) {
-                sweepGroup(groupId)
-            }
+            armedPair(app)?.let { sweepGroup(it.first) }
         } catch (e: Exception) {
             Log.w(TAG, "region sweep failed", e)
         } finally {
@@ -304,17 +275,16 @@ object GroupBalancer {
             sweepers.forEach { it.join() }
     }
 
-    /** Race every armed pool in turn. */
+    /** Race the one lit pool. */
     suspend fun runSpeedRound() {
-        for ((gid, cc) in armedPairs(app)) {
-            runSpeedRoundFor(gid, cc)
-        }
+        armedPair(app)?.let { runSpeedRoundFor(it.first, it.second) }
     }
 
     /**
-     * Speed-test one pool's members and refresh the records. The
-     * main selection only moves when it already rides this pool —
-     * arming a pool never yanks a connection that is elsewhere.
+     * Speed-test one pool's members and refresh the records. When
+     * the pool is the lit one (the general line), the round steers
+     * the main connection to the pool's fastest member; rounds for
+     * any other pool only refresh records.
      */
     suspend fun runSpeedRoundFor(groupId: Long, cc: String) {
         if (!roundRunning.compareAndSet(false, true)) return
@@ -354,12 +324,10 @@ object GroupBalancer {
                 Log.i(TAG, "round for $cc: nothing reachable")
                 return
             }
-            val current = all.firstOrNull { it.id == DataStore.selectedProxy }
-            val ridingThisPool = current != null &&
-                GeoStore.countryFor(app, current.requireBean()) == cc
-            // The locked pool is the general line: its rounds may
-            // always steer the main connection into the pool.
-            val steering = ridingThisPool || lockedPair(app) == (groupId to cc)
+            // The lit pool is the general line: its rounds always
+            // steer the main connection into the pool, wherever the
+            // current selection happens to sit.
+            val steering = armedPair(app) == (groupId to cc)
             if (DataStore.selectedProxy == best.id) {
                 Log.i(TAG, "round for $cc: staying on ${best.requireBean().displayName()} (${best.ping}ms)")
             } else if (steering) {
@@ -391,24 +359,10 @@ object GroupBalancer {
      * finds something better).
      */
     suspend fun pickForConnect() {
-        lockedPair(app)?.let { (gid, lcc) ->
-            val best = bestKnown(app, gid, lcc) ?: return@let
-            if (DataStore.selectedProxy != best.id) {
-                val previous = DataStore.selectedProxy
-                DataStore.selectedProxy = best.id
-                ProfileManager.postUpdate(previous)
-                ProfileManager.postUpdate(best.id)
-                Log.i(TAG, "connect pick (locked) -> ${best.requireBean().displayName()} (${best.ping}ms)")
-            }
-            scope.launch { runSpeedRoundFor(gid, lcc) }
-            return
-        }
-        val selected = withContext(Dispatchers.IO) {
-            SagerDatabase.proxyDao.getById(DataStore.selectedProxy)
-        } ?: return
-        val cc = GeoStore.countryFor(app, selected.requireBean()) ?: return
-        if (!isArmed(app, selected.groupId, cc)) return
-        val best = bestKnown(app, selected.groupId, cc, preferId = selected.id) ?: return
+        // The lit pool is the general line: connect starts on its
+        // best known member, wherever the selection sat before.
+        val armed = armedPair(app) ?: return
+        val best = bestKnown(app, armed.first, armed.second) ?: return
         if (DataStore.selectedProxy != best.id) {
             val previous = DataStore.selectedProxy
             DataStore.selectedProxy = best.id
@@ -416,7 +370,7 @@ object GroupBalancer {
             ProfileManager.postUpdate(best.id)
             Log.i(TAG, "connect pick -> ${best.requireBean().displayName()} (${best.ping}ms)")
         }
-        scope.launch { runSpeedRoundFor(selected.groupId, cc) }
+        scope.launch { runSpeedRoundFor(armed.first, armed.second) }
     }
 
     /** Best known member of a pool, from the recorded test results. */

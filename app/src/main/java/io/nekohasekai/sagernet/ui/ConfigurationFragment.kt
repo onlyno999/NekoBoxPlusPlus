@@ -1677,9 +1677,39 @@ class ConfigurationFragment @JvmOverloads constructor(
             fun bind(header: GeoHeader) {
                 titleText.text = "${header.title} · ${header.count}"
                 arrowText.text = if (header.expanded) "▾" else "▸"
-                view.setOnClickListener {
-                    adapter?.toggleSection(header.key)
-                }
+                // Single tap expands the section; double tap locks
+                // it as the general line (the pool that unrouted
+                // traffic walks). Locking is a front-page concept,
+                // not part of the route-rule picker.
+                val gesture = android.view.GestureDetector(
+                    view.context,
+                    object : android.view.GestureDetector.SimpleOnGestureListener() {
+                        override fun onDown(e: android.view.MotionEvent): Boolean = true
+
+                        override fun onSingleTapConfirmed(
+                            e: android.view.MotionEvent,
+                        ): Boolean {
+                            adapter?.toggleSection(header.key)
+                            return true
+                        }
+
+                        override fun onDoubleTap(
+                            e: android.view.MotionEvent,
+                        ): Boolean {
+                            if (!select && header.key.isNotEmpty()) {
+                                val locked = GroupBalancer.lockedPair(view.context)
+                                val isLocked = locked?.first == proxyGroup.id &&
+                                    locked.second == header.key
+                                GroupBalancer.setLocked(
+                                    view.context, proxyGroup.id, header.key, !isLocked
+                                )
+                                adapter?.notifyDataSetChanged()
+                            }
+                            return true
+                        }
+                    }
+                )
+                view.setOnTouchListener { _, e -> gesture.onTouchEvent(e); true }
                 if (header.key.isEmpty()) {
                     lbText.visibility = View.GONE
                     return
@@ -1687,11 +1717,18 @@ class ConfigurationFragment @JvmOverloads constructor(
                 lbText.visibility = View.VISIBLE
                 val active = GroupBalancer
                     .isArmed(view.context, proxyGroup.id, header.key)
-                lbText.text = if (active) "自动中" else "自动"
+                val lockedNow = GroupBalancer.lockedPair(view.context)
+                val isLocked = lockedNow?.first == proxyGroup.id &&
+                    lockedNow.second == header.key
+                lbText.text = when {
+                    isLocked -> "锁定"
+                    active -> "自动中"
+                    else -> "自动"
+                }
                 lbText.setTextColor(
-                    if (active) 0xFF2E9E4F.toInt() else 0xFF777777.toInt()
+                    if (isLocked || active) 0xFF2E9E4F.toInt() else 0xFF777777.toInt()
                 )
-                lbText.setTypeface(null, if (active) android.graphics.Typeface.BOLD else android.graphics.Typeface.NORMAL)
+                lbText.setTypeface(null, if (isLocked || active) android.graphics.Typeface.BOLD else android.graphics.Typeface.NORMAL)
                 lbText.setOnClickListener {
                     if (select) {
                         // Route-rule picker: choosing this country binds

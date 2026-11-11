@@ -40,6 +40,7 @@ object GroupBalancer {
     private const val TAG = "GrpLB"
     private const val PREFS = "nbpp_lb"
     private const val KEY_SET = "lb_armed_set"
+    private const val KEY_LOCK = "lb_lock"
     private const val KEY_COUNTRY = "lb_country"
     private const val KEY_GROUP = "lb_group"
     private const val SPEED_INTERVAL_MS = 10 * 60_000L
@@ -103,11 +104,12 @@ object GroupBalancer {
         val pairs = armedPairs(context).toMutableSet()
         val pair = groupId to countryCode.uppercase()
         if (on) pairs.add(pair) else pairs.remove(pair)
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
-            .putStringSet(KEY_SET, pairs.map { keyOf(it.first, it.second) }.toSet())
-            .remove(KEY_COUNTRY)
-            .remove(KEY_GROUP)
-            .apply()
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().apply {
+            putStringSet(KEY_SET, pairs.map { keyOf(it.first, it.second) }.toSet())
+            remove(KEY_COUNTRY)
+            remove(KEY_GROUP)
+            if (!on && lockedPair(context) == pair) remove(KEY_LOCK)
+        }.apply()
         if (pairs.isEmpty()) {
             stopLoops()
         } else if (on) {
@@ -124,6 +126,36 @@ object GroupBalancer {
         regionJob?.cancel(); regionJob = null
         watchdogJob?.cancel(); watchdogJob = null
         watchdogFails = 0
+    }
+
+    /**
+     * The locked pool is the general line: traffic that no route
+     * rule claims rides it. At most one pool is locked at a time;
+     * locking another section moves the lock. Locking also arms
+     * the pool (the general line must be maintained).
+     */
+    fun lockedPair(context: Context): Pair<Long, String>? {
+        val raw = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getString(KEY_LOCK, null) ?: return null
+        val parts = raw.split("|")
+        val gid = parts.getOrNull(0)?.toLongOrNull() ?: return null
+        val cc = parts.getOrNull(1)?.takeIf { it.length == 2 } ?: return null
+        return gid to cc
+    }
+
+    fun setLocked(context: Context, groupId: Long, countryCode: String, on: Boolean) {
+        val pair = groupId to countryCode.uppercase()
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        if (on) {
+            prefs.edit().putString(KEY_LOCK, keyOf(pair.first, pair.second)).apply()
+            if (!isArmed(context, groupId, countryCode)) {
+                setArmed(context, groupId, countryCode, true)
+            } else {
+                scope.launch { runSpeedRoundFor(pair.first, pair.second) }
+            }
+        } else if (lockedPair(context) == pair) {
+            prefs.edit().remove(KEY_LOCK).apply()
+        }
     }
 
     /** Start the periodic loops if any pool is armed. */
@@ -182,6 +214,13 @@ object GroupBalancer {
                 if (cc != null && isArmed(app, selected.groupId, cc)) {
                     failOverFromRecord(selected.groupId, cc, selected.id)
                     scope.launch { runSpeedRoundFor(selected.groupId, cc) }
+                } else {
+                    // The dead node belongs to no armed pool: the
+                    // general line takes over if one is locked.
+                    lockedPair(app)?.let { (gid, lcc) ->
+                        failOverFromRecord(gid, lcc, selected.id)
+                        scope.launch { runSpeedRoundFor(gid, lcc) }
+                    }
                 }
             }
         }
@@ -318,9 +357,12 @@ object GroupBalancer {
             val current = all.firstOrNull { it.id == DataStore.selectedProxy }
             val ridingThisPool = current != null &&
                 GeoStore.countryFor(app, current.requireBean()) == cc
+            // The locked pool is the general line: its rounds may
+            // always steer the main connection into the pool.
+            val steering = ridingThisPool || lockedPair(app) == (groupId to cc)
             if (DataStore.selectedProxy == best.id) {
                 Log.i(TAG, "round for $cc: staying on ${best.requireBean().displayName()} (${best.ping}ms)")
-            } else if (ridingThisPool) {
+            } else if (steering) {
                 val previous = DataStore.selectedProxy
                 DataStore.selectedProxy = best.id
                 ProfileManager.postUpdate(previous)
@@ -349,6 +391,18 @@ object GroupBalancer {
      * finds something better).
      */
     suspend fun pickForConnect() {
+        lockedPair(app)?.let { (gid, lcc) ->
+            val best = bestKnown(app, gid, lcc) ?: return@let
+            if (DataStore.selectedProxy != best.id) {
+                val previous = DataStore.selectedProxy
+                DataStore.selectedProxy = best.id
+                ProfileManager.postUpdate(previous)
+                ProfileManager.postUpdate(best.id)
+                Log.i(TAG, "connect pick (locked) -> ${best.requireBean().displayName()} (${best.ping}ms)")
+            }
+            scope.launch { runSpeedRoundFor(gid, lcc) }
+            return
+        }
         val selected = withContext(Dispatchers.IO) {
             SagerDatabase.proxyDao.getById(DataStore.selectedProxy)
         } ?: return

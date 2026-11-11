@@ -1820,7 +1820,7 @@ class ConfigurationFragment @JvmOverloads constructor(
                             // Long-press drags the section to a new
                             // position; the order is then locked in.
                             if (!select && header.key.isNotEmpty()) {
-                                (parentFragment as? ConfigurationFragment)
+                                (parentFragment as? GroupFragment)
                                     ?.startSectionDrag(this@GeoHeaderHolder)
                             }
                         }

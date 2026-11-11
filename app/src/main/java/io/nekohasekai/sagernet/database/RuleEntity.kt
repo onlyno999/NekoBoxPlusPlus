@@ -57,8 +57,14 @@ data class RuleEntity(
             0L -> app.getString(R.string.route_proxy)
             -1L -> app.getString(R.string.route_bypass)
             -2L -> app.getString(R.string.route_block)
-            else -> ProfileManager.getProfile(outbound)?.displayName()
-                ?: app.getString(R.string.error_title)
+            else -> if (io.nekohasekai.sagernet.geo.LbRef.isLb(outbound)) {
+                io.nekohasekai.sagernet.geo.LbRef.label(
+                    io.nekohasekai.sagernet.geo.LbRef.countryCode(outbound)
+                )
+            } else {
+                ProfileManager.getProfile(outbound)?.displayName()
+                    ?: app.getString(R.string.error_title)
+            }
         }
     }
 

@@ -125,8 +125,13 @@ fun buildConfig(
 
     val extraRules = if (forTest) listOf() else SagerDatabase.rulesDao.enabledRules()
     val extraProxies =
-        if (forTest) mapOf() else SagerDatabase.proxyDao.getEntities(extraRules.mapNotNull { rule ->
-            rule.outbound.takeIf { it > 0 && it != proxy.id }
+        if (forTest) mapOf() else SagerDatabase.proxyDao.getEntities(extraRules.flatMap { rule ->
+            when {
+                rule.outbound > 0 && rule.outbound != proxy.id -> listOf(rule.outbound)
+                io.nekohasekai.sagernet.geo.LbRef.isLb(rule.outbound) ->
+                    io.nekohasekai.sagernet.geo.LbRef.memberIds(rule.outbound)
+                else -> listOf()
+            }
         }.toHashSet().toList()).associateBy { it.id }
     val buildSelector = !forTest && group?.isSelector == true && !forExport
     val userDNSRuleList = mutableListOf<DNSRule_DefaultOptions>()
@@ -479,6 +484,26 @@ fun buildConfig(
             tagMap[key] = buildChain(key, p)
         }
 
+        // NekoBox++: urltest outbounds for rules pointing at an LB country.
+        if (!forTest) {
+            val lbRefs = extraRules.map { it.outbound }
+                .filter { io.nekohasekai.sagernet.geo.LbRef.isLb(it) }
+                .distinct()
+            for (ref in lbRefs) {
+                val memberTags = io.nekohasekai.sagernet.geo.LbRef.memberIds(ref)
+                    .mapNotNull { tagMap[it] }
+                if (memberTags.isNotEmpty()) {
+                    outbounds.add(Outbound_URLTestOptions().apply {
+                        type = "urltest"
+                        tag = io.nekohasekai.sagernet.geo.LbRef.tagFor(ref)
+                        outbounds = memberTags
+                        url = "https://www.gstatic.com/generate_204"
+                        tolerance = 50
+                    })
+                }
+            }
+        }
+
         // apply user rules
         for (rule in extraRules) {
             if (rule.packages.isNotEmpty()) {
@@ -578,7 +603,14 @@ fun buildConfig(
                     0L -> TAG_PROXY
                     -1L -> TAG_BYPASS
                     -2L -> TAG_BLOCK
-                    else -> if (outId == proxy.id) TAG_PROXY else tagMap[outId] ?: ""
+                    else -> if (io.nekohasekai.sagernet.geo.LbRef.isLb(outId)) {
+                        val lbTag = io.nekohasekai.sagernet.geo.LbRef.tagFor(outId)
+                        if (outbounds.any { it.tag == lbTag }) lbTag else TAG_PROXY
+                    } else if (outId == proxy.id) {
+                        TAG_PROXY
+                    } else {
+                        tagMap[outId] ?: ""
+                    }
                 }
 
                 _hack_custom_config = rule.config

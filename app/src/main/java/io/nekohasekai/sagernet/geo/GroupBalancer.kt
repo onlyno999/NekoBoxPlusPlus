@@ -44,7 +44,7 @@ object GroupBalancer {
     private const val KEY_LOCK = "lb_lock"
     private const val KEY_COUNTRY = "lb_country"
     private const val KEY_GROUP = "lb_group"
-    private const val SPEED_INTERVAL_MS = 10 * 60_000L
+    private const val SPEED_INTERVAL_MS = 5 * 60_000L
     private const val REGION_INTERVAL_MS = 30 * 60_000L
     private const val WATCHDOG_MS = 30_000L
 
@@ -319,7 +319,13 @@ object GroupBalancer {
             }
             workers.forEach { it.join() }
 
-            val best = eligible.minByOrNull { it.ping }
+            // Switch right after testing, to the fastest known:
+            // this round's winner, or a recorded available best if
+            // it is faster (a flaky parallel pass must not bury a
+            // node that measured well minutes ago).
+            val tested = eligible.minByOrNull { it.ping }
+            val recorded = bestKnown(app, groupId, cc)?.takeIf { it.ping > 0 }
+            val best = listOfNotNull(tested, recorded).minByOrNull { it.ping }
             if (best == null) {
                 Log.i(TAG, "round for $cc: nothing reachable")
                 return

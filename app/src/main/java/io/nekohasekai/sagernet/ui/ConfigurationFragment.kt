@@ -1695,9 +1695,10 @@ class ConfigurationFragment @JvmOverloads constructor(
                 lbText.setOnClickListener {
                     if (select) {
                         // Route-rule picker: choosing this country binds
-                        // the rule to its load balancer and turns the
-                        // balancer on for it (never disarms here).
-                        GroupBalancer.setActive(view.context, proxyGroup.id, header.key)
+                        // the rule to that country's own load-balance
+                        // pool (a config-level urltest outbound). It is
+                        // independent of the front-page balancer armed
+                        // state, which this must not touch.
                         val frag = parentFragment as? ConfigurationFragment
                         (frag?.requireActivity() as? SelectCallback)
                             ?.returnLbOutbound(

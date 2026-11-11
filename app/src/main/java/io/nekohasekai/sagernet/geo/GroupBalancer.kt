@@ -214,7 +214,7 @@ object GroupBalancer {
             if (all.isEmpty()) return
             val sweepQueue = ConcurrentLinkedQueue(all)
             val sweepers = mutableListOf<Job>()
-            repeat(32) {
+            repeat(8) {
                 sweepers.add(scope.launch {
                     while (true) {
                         val profile = sweepQueue.poll() ?: break

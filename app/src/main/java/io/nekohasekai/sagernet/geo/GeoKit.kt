@@ -102,11 +102,13 @@ object GeoStore {
 
     fun record(context: Context, bean: AbstractBean, countryCode: String?) {
         val key = keyOf(bean)
-        loadTry(context)[key] = System.currentTimeMillis()
+        // Only stamp the 24h retry lock on success: a failed probe (storm
+        // timeout, transient network) must stay retryable on the next round.
         if (!countryCode.isNullOrBlank()) {
+            loadTry(context)[key] = System.currentTimeMillis()
             loadMap(context)[key] = countryCode.uppercase()
+            save(context)
         }
-        save(context)
     }
 
     private const val KEY_COLLAPSE = "geo_collapse"
@@ -198,7 +200,7 @@ object GeoProbe {
             if (targets.isEmpty()) return@withContext
             val queue = ConcurrentLinkedQueue(targets)
             val jobs = mutableListOf<kotlinx.coroutines.Job>()
-            repeat(minOf(100, targets.size)) {
+            repeat(minOf(4, targets.size)) {
                 jobs.add(launch {
                     while (true) {
                         if (DataStore.runningTest) break

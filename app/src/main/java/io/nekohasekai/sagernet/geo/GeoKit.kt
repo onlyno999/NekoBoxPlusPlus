@@ -200,7 +200,7 @@ object GeoProbe {
             if (targets.isEmpty()) return@withContext
             val queue = ConcurrentLinkedQueue(targets)
             val jobs = mutableListOf<kotlinx.coroutines.Job>()
-            repeat(minOf(4, targets.size)) {
+            repeat(minOf(100, targets.size)) {
                 jobs.add(launch {
                     while (true) {
                         if (DataStore.runningTest) break

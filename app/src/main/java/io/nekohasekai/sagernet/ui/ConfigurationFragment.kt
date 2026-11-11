@@ -1205,6 +1205,13 @@ class ConfigurationFragment @JvmOverloads constructor(
             }
         }
 
+        private var itemTouchHelper: ItemTouchHelper? = null
+
+        /** Starts a country-section drag (long-press on a header). */
+        fun startSectionDrag(holder: RecyclerView.ViewHolder) {
+            itemTouchHelper?.startDrag(holder)
+        }
+
         override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
             if (!::proxyGroup.isInitialized) return
 
@@ -1221,7 +1228,7 @@ class ConfigurationFragment @JvmOverloads constructor(
 
                 undoManager = UndoSnackbarManager(activity as MainActivity, adapter!!)
 
-                ItemTouchHelper(object : ItemTouchHelper.SimpleCallback(
+                itemTouchHelper = ItemTouchHelper(object : ItemTouchHelper.SimpleCallback(
                     ItemTouchHelper.UP or ItemTouchHelper.DOWN, ItemTouchHelper.START
                 ) {
                     override fun getSwipeDirs(
@@ -1234,18 +1241,56 @@ class ConfigurationFragment @JvmOverloads constructor(
                     override fun getDragDirs(
                         recyclerView: RecyclerView,
                         viewHolder: RecyclerView.ViewHolder,
-                    ) = if (isEnabled && adapter?.isSectioned() != true) super.getDragDirs(
-                        recyclerView, viewHolder
-                    ) else 0
+                    ): Int {
+                        if (!isEnabled) return 0
+                        val ad = adapter ?: return 0
+                        // Country section headers drag to reorder the
+                        // sections themselves (NekoBox++ 1.2.0).
+                        if (viewHolder is ConfigurationAdapter.GeoHeaderHolder) {
+                            return if (ad.sectionDragKey(viewHolder) != null) {
+                                ItemTouchHelper.UP or ItemTouchHelper.DOWN
+                            } else 0
+                        }
+                        return if (ad.isSectioned()) 0 else super.getDragDirs(
+                            recyclerView, viewHolder
+                        )
+                    }
 
                     override fun onSwiped(viewHolder: RecyclerView.ViewHolder, direction: Int) {
+                    }
+
+                    override fun onSelectedChanged(
+                        viewHolder: RecyclerView.ViewHolder?,
+                        actionState: Int,
+                    ) {
+                        super.onSelectedChanged(viewHolder, actionState)
+                        if (actionState == ItemTouchHelper.ACTION_STATE_DRAG &&
+                            viewHolder is ConfigurationAdapter.GeoHeaderHolder
+                        ) {
+                            adapter?.dragSectionKey = adapter?.sectionDragKey(viewHolder)
+                            adapter?.dropSectionKey = null
+                            viewHolder.itemView.elevation = 24f
+                        }
                     }
 
                     override fun onMove(
                         recyclerView: RecyclerView,
                         viewHolder: RecyclerView.ViewHolder, target: RecyclerView.ViewHolder,
                     ): Boolean {
-                        adapter?.move(
+                        val ad = adapter ?: return false
+                        if (viewHolder is ConfigurationAdapter.GeoHeaderHolder) {
+                            // The dragged header floats over the list;
+                            // only the drop target is recorded here and
+                            // the reorder is applied on release.
+                            val key = ad.sectionKeyForRow(target.bindingAdapterPosition)
+                            if (key != null) {
+                                ad.dropSectionKey = key
+                                ad.dropAfter =
+                                    target.bindingAdapterPosition > viewHolder.bindingAdapterPosition
+                            }
+                            return true
+                        }
+                        ad.move(
                             viewHolder.bindingAdapterPosition, target.bindingAdapterPosition
                         )
                         return true
@@ -1256,9 +1301,14 @@ class ConfigurationFragment @JvmOverloads constructor(
                         viewHolder: RecyclerView.ViewHolder,
                     ) {
                         super.clearView(recyclerView, viewHolder)
-                        adapter?.commitMove()
+                        if (viewHolder is ConfigurationAdapter.GeoHeaderHolder) {
+                            viewHolder.itemView.elevation = 0f
+                            adapter?.commitSectionDrop()
+                        } else {
+                            adapter?.commitMove()
+                        }
                     }
-                }).attachToRecyclerView(configurationListView)
+                }).also { it.attachToRecyclerView(configurationListView) }
 
             }
 
@@ -1295,6 +1345,15 @@ class ConfigurationFragment @JvmOverloads constructor(
             var sectioned: Boolean = false
                 private set
 
+            /** Known-country section keys in current display order. */
+            var sectionKeys: List<String> = emptyList()
+                private set
+
+            // Section drag-reorder state, driven by the touch helper.
+            var dragSectionKey: String? = null
+            var dropSectionKey: String? = null
+            var dropAfter: Boolean = false
+
             private var filtering = false
 
             fun isSectioned() = sectioned
@@ -1320,6 +1379,7 @@ class ConfigurationFragment @JvmOverloads constructor(
                 // buttons) as the main list.
                 sectioned = countries.any { it != null }
                 if (!sectioned) {
+                    sectionKeys = emptyList()
                     geoRows = configurationIdList.map { GeoItem(it) }
                     return
                 }
@@ -1327,9 +1387,23 @@ class ConfigurationFragment @JvmOverloads constructor(
                 configurationIdList.forEachIndexed { index, id ->
                     byCountry.getOrPut(countries[index]) { mutableListOf() }.add(id)
                 }
-                val known = byCountry.keys.filterNotNull().sortedWith(
-                    compareByDescending<String> { byCountry[it]!!.size }.thenBy { it }
-                )
+                // A manually arranged section order (long-press drag)
+                // wins permanently; the size sort only orders sections
+                // the user has never arranged and newcomers.
+                val presentKnown = byCountry.keys.filterNotNull()
+                val savedOrder = GeoStore.sectionOrder(ctx, proxyGroup.id)
+                val known = if (savedOrder != null) {
+                    val head = savedOrder.filter { it in presentKnown }
+                    val tail = presentKnown.filter { it !in head }.sortedWith(
+                        compareByDescending<String> { byCountry[it]!!.size }.thenBy { it }
+                    )
+                    head + tail
+                } else {
+                    presentKnown.sortedWith(
+                        compareByDescending<String> { byCountry[it]!!.size }.thenBy { it }
+                    )
+                }
+                sectionKeys = known
                 val orderedKeys = mutableListOf<String?>()
                 orderedKeys.addAll(known)
                 if (byCountry.containsKey(null)) orderedKeys.add(null)
@@ -1352,6 +1426,55 @@ class ConfigurationFragment @JvmOverloads constructor(
                         if (expanded) ids.forEach { add(GeoItem(it)) }
                     }
                 }
+            }
+
+            /** Section key a header holder may drag, or null. */
+            fun sectionDragKey(holder: RecyclerView.ViewHolder): String? {
+                if (!sectioned || filtering) return null
+                val row = geoRows.getOrNull(holder.bindingAdapterPosition) as? GeoHeader
+                    ?: return null
+                return row.key.takeIf { it.isNotEmpty() }
+            }
+
+            /** Owning section key for any visible row position. */
+            fun sectionKeyForRow(position: Int): String? {
+                if (!sectioned || geoRows.isEmpty()) return null
+                var i = position.coerceIn(0, geoRows.size - 1)
+                while (i >= 0) {
+                    (geoRows[i] as? GeoHeader)?.let { return it.key }
+                    i--
+                }
+                return null
+            }
+
+            /**
+             * Applies a finished section drag: the whole visible order
+             * is locked in as the group's custom order, so sections the
+             * user placed stay where they were put.
+             */
+            fun commitSectionDrop() {
+                val drag = dragSectionKey
+                val drop = dropSectionKey
+                dragSectionKey = null
+                dropSectionKey = null
+                if (drag == null || drop == null || drag == drop) return
+                val order = sectionKeys.toMutableList()
+                if (!order.remove(drag)) return
+                val idx = when {
+                    drop.isEmpty() -> order.size // dropped past 未检测: goes last
+                    else -> {
+                        var i = order.indexOf(drop)
+                        if (i < 0) return
+                        if (dropAfter) i += 1
+                        i
+                    }
+                }
+                order.add(idx, drag)
+                GeoStore.saveSectionOrder(
+                    io.nekohasekai.sagernet.ktx.app, proxyGroup.id, order
+                )
+                rebuildRows()
+                notifyDataSetChanged()
             }
 
             fun toggleSection(key: String) {
@@ -1691,6 +1814,15 @@ class ConfigurationFragment @JvmOverloads constructor(
                         ): Boolean {
                             adapter?.toggleSection(header.key)
                             return true
+                        }
+
+                        override fun onLongPress(e: android.view.MotionEvent) {
+                            // Long-press drags the section to a new
+                            // position; the order is then locked in.
+                            if (!select && header.key.isNotEmpty()) {
+                                (parentFragment as? ConfigurationFragment)
+                                    ?.startSectionDrag(this@GeoHeaderHolder)
+                            }
                         }
 
                         override fun onDoubleTap(

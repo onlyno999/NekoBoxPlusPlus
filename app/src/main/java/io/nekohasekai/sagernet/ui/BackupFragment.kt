@@ -139,7 +139,16 @@ class BackupFragment : NamedFragment(R.layout.layout_backup) {
                 .putString("user", binding.webdavUser.text.toString())
                 .putString("pass", binding.webdavPass.text.toString())
                 .apply()
-            return if (raw.endsWith("/")) raw + "nekoboxpp_backup.json" else raw
+            var base = raw
+            // Jianguoyun (Nutstore) refuses file writes at the /dav/
+            // root; use a NekoBox++ subfolder there instead.
+            val uri = runCatching { java.net.URI(raw) }.getOrNull()
+            if (uri?.host == "dav.jianguoyun.com" &&
+                (uri.path == "/dav" || uri.path == "/dav/")
+            ) {
+                base = raw.trimEnd('/') + "/NekoBox++/"
+            }
+            return if (base.endsWith("/")) base + "nekoboxpp_backup.json" else base
         }
 
         binding.actionWebdavUpload.setOnClickListener {
@@ -157,6 +166,13 @@ class BackupFragment : NamedFragment(R.layout.layout_backup) {
                         binding.backupRules.isChecked,
                         binding.backupSettings.isChecked
                     )
+                    if (target.endsWith("/nekoboxpp_backup.json")) {
+                        // Make sure the containing folder exists first
+                        // (Jianguoyun root fallback, fresh folders).
+                        WebDavBackup.mkcol(
+                            target.removeSuffix("nekoboxpp_backup.json"), user, pass
+                        )
+                    }
                     WebDavBackup.put(target, user, pass, data)
                     onMainDispatcher {
                         snackbar("WebDAV 上传完成").show()

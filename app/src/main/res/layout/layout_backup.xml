@@ -91,7 +91,7 @@
         android:id="@+id/webdav_url"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:hint="https://dav.example.com/backup/"
+        android:hint="https://dav.jianguoyun.com/dav/NekoBox/"
         android:inputType="textUri"
         android:singleLine="true" />
 

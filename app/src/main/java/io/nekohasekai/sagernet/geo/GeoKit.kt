@@ -122,6 +122,22 @@ object GeoStore {
         }.getOrNull()
     }
 
+    /**
+     * The group's manually arranged country-section order (1.2.0).
+     * Once the user drags sections around, this order wins over the
+     * automatic size-based sort and never reshuffles on its own;
+     * countries not listed yet append after it. Null = never arranged.
+     */
+    fun sectionOrder(context: Context, groupId: Long): List<String>? {
+        val raw = prefs(context).getString("order|$groupId", null) ?: return null
+        return raw.split(",").filter { it.isNotEmpty() }.takeIf { it.isNotEmpty() }
+    }
+
+    fun saveSectionOrder(context: Context, groupId: Long, order: List<String>) {
+        prefs(context).edit()
+            .putString("order|$groupId", order.joinToString(",")).apply()
+    }
+
     fun setSectionExpanded(context: Context, groupId: Long, key: String, expanded: Boolean) {
         val raw = prefs(context).getString(KEY_COLLAPSE, null)
         val json = runCatching { if (raw != null) JSONObject(raw) else JSONObject() }

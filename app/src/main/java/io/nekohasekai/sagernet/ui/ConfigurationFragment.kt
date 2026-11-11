@@ -1315,7 +1315,10 @@ class ConfigurationFragment @JvmOverloads constructor(
                         GeoStore.countryFor(ctx, it.requireBean())
                     }
                 }
-                sectioned = !select && countries.any { it != null }
+                // Sectioned in select mode too: the route-rule picker
+                // must show the same country sections (with the 自动
+                // buttons) as the main list.
+                sectioned = countries.any { it != null }
                 if (!sectioned) {
                     geoRows = configurationIdList.map { GeoItem(it) }
                     return

@@ -1246,7 +1246,7 @@ class ConfigurationFragment @JvmOverloads constructor(
                         val ad = adapter ?: return 0
                         // Country section headers drag to reorder the
                         // sections themselves (NekoBox++ 1.2.0).
-                        if (viewHolder is ConfigurationAdapter.GeoHeaderHolder) {
+                        if (viewHolder is GeoHeaderHolder) {
                             return if (ad.sectionDragKey(viewHolder) != null) {
                                 ItemTouchHelper.UP or ItemTouchHelper.DOWN
                             } else 0
@@ -1265,7 +1265,7 @@ class ConfigurationFragment @JvmOverloads constructor(
                     ) {
                         super.onSelectedChanged(viewHolder, actionState)
                         if (actionState == ItemTouchHelper.ACTION_STATE_DRAG &&
-                            viewHolder is ConfigurationAdapter.GeoHeaderHolder
+                            viewHolder is GeoHeaderHolder
                         ) {
                             adapter?.dragSectionKey = adapter?.sectionDragKey(viewHolder)
                             adapter?.dropSectionKey = null
@@ -1278,7 +1278,7 @@ class ConfigurationFragment @JvmOverloads constructor(
                         viewHolder: RecyclerView.ViewHolder, target: RecyclerView.ViewHolder,
                     ): Boolean {
                         val ad = adapter ?: return false
-                        if (viewHolder is ConfigurationAdapter.GeoHeaderHolder) {
+                        if (viewHolder is GeoHeaderHolder) {
                             // The dragged header floats over the list;
                             // only the drop target is recorded here and
                             // the reorder is applied on release.
@@ -1301,7 +1301,7 @@ class ConfigurationFragment @JvmOverloads constructor(
                         viewHolder: RecyclerView.ViewHolder,
                     ) {
                         super.clearView(recyclerView, viewHolder)
-                        if (viewHolder is ConfigurationAdapter.GeoHeaderHolder) {
+                        if (viewHolder is GeoHeaderHolder) {
                             viewHolder.itemView.elevation = 0f
                             adapter?.commitSectionDrop()
                         } else {

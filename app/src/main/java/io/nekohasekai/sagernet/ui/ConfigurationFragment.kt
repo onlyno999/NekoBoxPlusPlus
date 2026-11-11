@@ -1146,6 +1146,11 @@ class ConfigurationFragment @JvmOverloads constructor(
         override fun onResume() {
             super.onResume()
 
+            // The single lit pool may have been lit from another
+            // group's tab meanwhile; rebind so this page never shows
+            // a stale 自动中 next to the real one.
+            adapter?.notifyDataSetChanged()
+
             if (::configurationListView.isInitialized && configurationListView.size == 0) {
                 configurationListView.adapter = adapter
                 runOnDefaultDispatcher {

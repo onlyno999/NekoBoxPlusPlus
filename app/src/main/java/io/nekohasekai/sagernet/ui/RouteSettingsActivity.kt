@@ -127,9 +127,14 @@ class RouteSettingsActivity(
     ) { (resultCode, data) ->
         if (resultCode == Activity.RESULT_OK && data != null) {
             if (data.hasExtra(ProfileSelectActivity.EXTRA_LB_OUTBOUND)) {
-                DataStore.routeOutboundRule =
+                val encoded =
                     data.getLongExtra(ProfileSelectActivity.EXTRA_LB_OUTBOUND, 0)
-                outbound.value = "3"
+                runOnDefaultDispatcher {
+                    DataStore.routeOutboundRule = encoded
+                    onMainDispatcher {
+                        outbound.value = "3"
+                    }
+                }
                 return@registerForActivityResult
             }
             runOnDefaultDispatcher {
@@ -266,6 +271,21 @@ class RouteSettingsActivity(
     }
 
     suspend fun saveAndExit() {
+        try {
+            saveAndExitInner()
+        } catch (e: Exception) {
+            Logs.e(e)
+            onMainDispatcher {
+                MaterialAlertDialogBuilder(this@RouteSettingsActivity)
+                    .setTitle("保存失败")
+                    .setMessage(e.javaClass.simpleName + ": " + (e.message ?: ""))
+                    .setPositiveButton(android.R.string.ok, null)
+                    .show()
+            }
+        }
+    }
+
+    private suspend fun saveAndExitInner() {
 
         if (!needSave()) {
             onMainDispatcher {
@@ -292,7 +312,7 @@ class RouteSettingsActivity(
             }
             ProfileManager.updateRule(entity.apply { serialize() })
         }
-        finish()
+        onMainDispatcher { finish() }
 
     }
 

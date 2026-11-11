@@ -1781,28 +1781,31 @@ class ConfigurationFragment @JvmOverloads constructor(
                     }
                 } else {
                     view.setOnClickListener {
-                        runOnDefaultDispatcher {
-                            // A member of an armed (auto) section rides
-                            // its pool: connect through the pool's best
-                            // known member instead of this exact node.
-                            var tapTarget = proxyEntity
-                            val nodeCc = GeoStore.countryFor(
-                                view.context, proxyEntity.requireBean()
+                        // Members of an armed section (auto, including
+                        // the locked general line) are managed by the
+                        // balancer: manual selection stays blocked
+                        // until that section's auto is turned off.
+                        val nodeCc = GeoStore.countryFor(
+                            view.context, proxyEntity.requireBean()
+                        )
+                        if (nodeCc != null && GroupBalancer.isArmed(
+                                view.context, proxyGroup.id, nodeCc
                             )
-                            if (nodeCc != null && GroupBalancer.isArmed(
-                                    view.context, proxyGroup.id, nodeCc
-                                )
-                            ) {
-                                GroupBalancer.bestKnown(
-                                    view.context, proxyGroup.id, nodeCc
-                                )?.let { tapTarget = it }
-                            }
+                        ) {
+                            Toast.makeText(
+                                view.context,
+                                "自动中：先关掉自动才能手动选节点",
+                                Toast.LENGTH_SHORT
+                            ).show()
+                            return@setOnClickListener
+                        }
+                        runOnDefaultDispatcher {
                             var update: Boolean
                             var lastSelected: Long
                             profileAccess.withLock {
-                                update = DataStore.selectedProxy != tapTarget.id
+                                update = DataStore.selectedProxy != proxyEntity.id
                                 lastSelected = DataStore.selectedProxy
-                                DataStore.selectedProxy = tapTarget.id
+                                DataStore.selectedProxy = proxyEntity.id
                                 onMainDispatcher {
                                     selectedView.visibility = View.VISIBLE
                                 }

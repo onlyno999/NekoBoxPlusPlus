@@ -1686,7 +1686,7 @@ class ConfigurationFragment @JvmOverloads constructor(
                 }
                 lbText.visibility = View.VISIBLE
                 val active = GroupBalancer
-                    .activeCountry(view.context, proxyGroup.id) == header.key
+                    .isArmed(view.context, proxyGroup.id, header.key)
                 lbText.text = if (active) "自动中" else "自动"
                 lbText.setTextColor(
                     if (active) 0xFF2E9E4F.toInt() else 0xFF777777.toInt()
@@ -1706,8 +1706,8 @@ class ConfigurationFragment @JvmOverloads constructor(
                                     .encode(proxyGroup.id, header.key)
                             )
                     } else {
-                        GroupBalancer.setActive(
-                            view.context, proxyGroup.id, if (active) null else header.key
+                        GroupBalancer.setArmed(
+                            view.context, proxyGroup.id, header.key, !active
                         )
                         adapter?.notifyDataSetChanged()
                     }
@@ -1744,29 +1744,28 @@ class ConfigurationFragment @JvmOverloads constructor(
                     }
                 } else {
                     view.setOnClickListener {
-                        // Auto country armed for this group: nodes in
-                        // the auto section belong to the balancer.
-                        // Manual selection requires turning auto off.
-                        GroupBalancer.activeCountry(view.context, proxyGroup.id)?.let { cc ->
-                            if (GeoStore.countryFor(
-                                    view.context, proxyEntity.requireBean()
-                                ) == cc
-                            ) {
-                                Toast.makeText(
-                                    view.context,
-                                    "自动中：先关掉自动才能手动选节点",
-                                    Toast.LENGTH_SHORT
-                                ).show()
-                                return@setOnClickListener
-                            }
-                        }
                         runOnDefaultDispatcher {
+                            // A member of an armed (auto) section rides
+                            // its pool: connect through the pool's best
+                            // known member instead of this exact node.
+                            var tapTarget = proxyEntity
+                            val nodeCc = GeoStore.countryFor(
+                                view.context, proxyEntity.requireBean()
+                            )
+                            if (nodeCc != null && GroupBalancer.isArmed(
+                                    view.context, proxyGroup.id, nodeCc
+                                )
+                            ) {
+                                GroupBalancer.bestKnown(
+                                    view.context, proxyGroup.id, nodeCc
+                                )?.let { tapTarget = it }
+                            }
                             var update: Boolean
                             var lastSelected: Long
                             profileAccess.withLock {
-                                update = DataStore.selectedProxy != proxyEntity.id
+                                update = DataStore.selectedProxy != tapTarget.id
                                 lastSelected = DataStore.selectedProxy
-                                DataStore.selectedProxy = proxyEntity.id
+                                DataStore.selectedProxy = tapTarget.id
                                 onMainDispatcher {
                                     selectedView.visibility = View.VISIBLE
                                 }

@@ -23,20 +23,23 @@ import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * Load balancing for NekoBox++: in any subscription group, one
- * country section can be marked "auto" (one armed group+country at
- * a time). A round URL-tests only that country's nodes, selects
- * the reachable one with the lowest latency, and (when the service
- * is running) switches the connection to it. Speed rounds repeat
- * every 10 minutes, whole-group region sweeps every 30, and a
- * 30-second watchdog swaps instantly from the recorded results
- * when the node in use dies twice in a row. The loop lives in the
- * app process; it resumes on the next app start while armed.
+ * Load balancing for NekoBox++: every country section of every
+ * group can be marked "auto" independently — any number of
+ * (group, country) pools can be armed at once and they do not
+ * affect each other. An armed pool keeps its members speed-tested
+ * (rounds every 10 minutes, region sweeps of its group every 30).
+ * While the main connection rides a member of an armed pool, the
+ * pool keeps it on the fastest member: rounds steer within the
+ * pool, and a 30-second watchdog swaps instantly from the recorded
+ * results when the node in use dies twice in a row. Route-rule
+ * load balancing is separate: those pools live in the generated
+ * config as urltest outbounds and never touch this state.
  */
 object GroupBalancer {
 
     private const val TAG = "GrpLB"
     private const val PREFS = "nbpp_lb"
+    private const val KEY_SET = "lb_armed_set"
     private const val KEY_COUNTRY = "lb_country"
     private const val KEY_GROUP = "lb_group"
     private const val SPEED_INTERVAL_MS = 10 * 60_000L
@@ -62,35 +65,57 @@ object GroupBalancer {
     @Volatile
     private var watchdogFails = 0
 
-    /** The armed country, but only for the group it was armed in. */
-    fun activeCountry(context: Context, groupId: Long): String? {
-        if (armedGroupId(context) != groupId) return null
-        return armedCountry(context)
+    private fun keyOf(groupId: Long, countryCode: String) =
+        "$groupId|${countryCode.uppercase()}"
+
+    /**
+     * All armed (group, country) pools. Migrates the legacy
+     * single-pair keys (pre-v1.11) on first read.
+     */
+    fun armedPairs(context: Context): Set<Pair<Long, String>> {
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val raw = prefs.getStringSet(KEY_SET, null)
+        if (raw == null) {
+            val legacyCc = prefs.getString(KEY_COUNTRY, null)
+                ?.takeIf { it.isNotBlank() }
+            val legacyGid = prefs.getLong(KEY_GROUP, -1L).takeIf { it >= 0 }
+            if (legacyCc != null && legacyGid != null) {
+                return setOf(legacyGid to legacyCc.uppercase())
+            }
+            return emptySet()
+        }
+        return raw.mapNotNull { entry ->
+            val parts = entry.split("|")
+            val gid = parts.getOrNull(0)?.toLongOrNull() ?: return@mapNotNull null
+            val cc = parts.getOrNull(1)?.takeIf { it.length == 2 }
+                ?: return@mapNotNull null
+            gid to cc
+        }.toSet()
     }
 
-    fun armedCountry(context: Context): String? =
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .getString(KEY_COUNTRY, null)?.takeIf { it.isNotBlank() }
+    fun isArmed(context: Context, groupId: Long, countryCode: String): Boolean =
+        armedPairs(context).any {
+            it.first == groupId && it.second == countryCode.uppercase()
+        }
 
-    fun armedGroupId(context: Context): Long? =
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .getLong(KEY_GROUP, -1L).takeIf { it >= 0 }
-
-    fun setActive(context: Context, groupId: Long, countryCode: String?) {
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().apply {
-            if (countryCode.isNullOrBlank()) {
-                remove(KEY_COUNTRY)
-                remove(KEY_GROUP)
-            } else {
-                putString(KEY_COUNTRY, countryCode.uppercase())
-                putLong(KEY_GROUP, groupId)
-            }
-        }.apply()
-        if (countryCode.isNullOrBlank()) {
+    /** Toggle one pool. Other pools are never affected. */
+    fun setArmed(context: Context, groupId: Long, countryCode: String, on: Boolean) {
+        val pairs = armedPairs(context).toMutableSet()
+        val pair = groupId to countryCode.uppercase()
+        if (on) pairs.add(pair) else pairs.remove(pair)
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putStringSet(KEY_SET, pairs.map { keyOf(it.first, it.second) }.toSet())
+            .remove(KEY_COUNTRY)
+            .remove(KEY_GROUP)
+            .apply()
+        if (pairs.isEmpty()) {
             stopLoops()
-        } else {
+        } else if (on) {
             ensureLoop(context)
-            scope.launch { runRound() }
+            scope.launch {
+                runRegionSweep()
+                runSpeedRoundFor(groupId, countryCode.uppercase())
+            }
         }
     }
 
@@ -101,9 +126,9 @@ object GroupBalancer {
         watchdogFails = 0
     }
 
-    /** Start the periodic loops if a country is active. */
+    /** Start the periodic loops if any pool is armed. */
     fun ensureLoop(context: Context) {
-        if (armedCountry(context) == null) return
+        if (armedPairs(context).isEmpty()) return
         if (speedJob?.isActive != true) {
             speedJob = scope.launch {
                 while (isActive) {
@@ -138,12 +163,10 @@ object GroupBalancer {
      */
     private suspend fun watchdogTick() {
         if (!DataStore.serviceState.connected) return
-        if (armedCountry(app) == null) return
+        if (armedPairs(app).isEmpty()) return
         if (roundRunning.get()) return
-        val groupId = armedGroupId(app) ?: return
         val selected = withContext(Dispatchers.IO) {
-            SagerDatabase.proxyDao.getByGroup(groupId)
-                .firstOrNull { it.id == DataStore.selectedProxy }
+            SagerDatabase.proxyDao.getById(DataStore.selectedProxy)
         } ?: return
         if (testPing(selected)) {
             watchdogFails = 0
@@ -153,11 +176,13 @@ object GroupBalancer {
             if (watchdogFails >= 2) {
                 watchdogFails = 0
                 // Swap FIRST, from the recorded results, like a native
-                // urltest group does: the fastest other node the
-                // background rounds already know is reachable. The
-                // fresh race afterwards only refreshes the record.
-                failOverFromRecord(groupId, selected.id)
-                scope.launch { runSpeedRound() }
+                // urltest group does — but only inside the dead node's
+                // own pool, and only when that pool is armed.
+                val cc = GeoStore.countryFor(app, selected.requireBean())
+                if (cc != null && isArmed(app, selected.groupId, cc)) {
+                    failOverFromRecord(selected.groupId, cc, selected.id)
+                    scope.launch { runSpeedRoundFor(selected.groupId, cc) }
+                }
             }
         }
     }
@@ -168,8 +193,7 @@ object GroupBalancer {
      * test passed, and switch to it right away. No testing happens
      * on this path, so the swap itself takes no time.
      */
-    private suspend fun failOverFromRecord(groupId: Long, deadId: Long) {
-        val cc = armedCountry(app) ?: return
+    private suspend fun failOverFromRecord(groupId: Long, cc: String, deadId: Long) {
         val candidates = withContext(Dispatchers.IO) {
             SagerDatabase.proxyDao.getByGroup(groupId)
         }.filter {
@@ -207,7 +231,17 @@ object GroupBalancer {
     suspend fun runRegionSweep() {
         if (!sweepRunning.compareAndSet(false, true)) return
         try {
-            val groupId = armedGroupId(app) ?: return
+            for (groupId in armedPairs(app).map { it.first }.distinct()) {
+                sweepGroup(groupId)
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "region sweep failed", e)
+        } finally {
+            sweepRunning.set(false)
+        }
+    }
+
+    private suspend fun sweepGroup(groupId: Long) {
             val all = withContext(Dispatchers.IO) {
                 SagerDatabase.proxyDao.getByGroup(groupId)
             }
@@ -229,21 +263,25 @@ object GroupBalancer {
                 })
             }
             sweepers.forEach { it.join() }
-        } catch (e: Exception) {
-            Log.w(TAG, "region sweep failed", e)
-        } finally {
-            sweepRunning.set(false)
+    }
+
+    /** Race every armed pool in turn. */
+    suspend fun runSpeedRound() {
+        for ((gid, cc) in armedPairs(app)) {
+            runSpeedRoundFor(gid, cc)
         }
     }
 
-    /** Speed-test the active country's members and pick the fastest. */
-    suspend fun runSpeedRound() {
+    /**
+     * Speed-test one pool's members and refresh the records. The
+     * main selection only moves when it already rides this pool —
+     * arming a pool never yanks a connection that is elsewhere.
+     */
+    suspend fun runSpeedRoundFor(groupId: Long, cc: String) {
         if (!roundRunning.compareAndSet(false, true)) return
         val doneSignal = kotlinx.coroutines.CompletableDeferred<Unit>()
         roundDone = doneSignal
         try {
-            val cc = armedCountry(app) ?: return
-            val groupId = armedGroupId(app) ?: return
             val all = withContext(Dispatchers.IO) {
                 SagerDatabase.proxyDao.getByGroup(groupId)
             }
@@ -277,7 +315,12 @@ object GroupBalancer {
                 Log.i(TAG, "round for $cc: nothing reachable")
                 return
             }
-            if (DataStore.selectedProxy != best.id) {
+            val current = all.firstOrNull { it.id == DataStore.selectedProxy }
+            val ridingThisPool = current != null &&
+                GeoStore.countryFor(app, current.requireBean()) == cc
+            if (DataStore.selectedProxy == best.id) {
+                Log.i(TAG, "round for $cc: staying on ${best.requireBean().displayName()} (${best.ping}ms)")
+            } else if (ridingThisPool) {
                 val previous = DataStore.selectedProxy
                 DataStore.selectedProxy = best.id
                 ProfileManager.postUpdate(previous)
@@ -287,7 +330,7 @@ object GroupBalancer {
                     SagerNet.reloadService()
                 }
             } else {
-                Log.i(TAG, "round for $cc: staying on ${best.requireBean().displayName()} (${best.ping}ms)")
+                Log.i(TAG, "round for $cc: records refreshed (not riding this pool)")
             }
         } catch (e: Exception) {
             Log.w(TAG, "round failed", e)
@@ -306,30 +349,36 @@ object GroupBalancer {
      * finds something better).
      */
     suspend fun pickForConnect() {
-        val cc = armedCountry(app) ?: return
-        val groupId = armedGroupId(app) ?: return
-        val profiles = withContext(Dispatchers.IO) {
-            SagerDatabase.proxyDao.getByGroup(groupId)
-        }
-        val inCountry = profiles.filter {
-            GeoStore.countryFor(app, it.requireBean()) == cc
-        }
-        val current = inCountry.firstOrNull { it.id == DataStore.selectedProxy }
-        val best = when {
-            current != null -> current
-            else -> inCountry.filter { it.status == 1 && it.ping > 0 }
-                .minByOrNull { it.ping }
-                ?: inCountry.filter { it.ping > 0 }.minByOrNull { it.ping }
-                ?: inCountry.firstOrNull()
-        }
-        if (best != null && DataStore.selectedProxy != best.id) {
+        val selected = withContext(Dispatchers.IO) {
+            SagerDatabase.proxyDao.getById(DataStore.selectedProxy)
+        } ?: return
+        val cc = GeoStore.countryFor(app, selected.requireBean()) ?: return
+        if (!isArmed(app, selected.groupId, cc)) return
+        val best = bestKnown(app, selected.groupId, cc, preferId = selected.id) ?: return
+        if (DataStore.selectedProxy != best.id) {
             val previous = DataStore.selectedProxy
             DataStore.selectedProxy = best.id
             ProfileManager.postUpdate(previous)
             ProfileManager.postUpdate(best.id)
             Log.i(TAG, "connect pick -> ${best.requireBean().displayName()} (${best.ping}ms)")
         }
-        scope.launch { runSpeedRound() }
+        scope.launch { runSpeedRoundFor(selected.groupId, cc) }
+    }
+
+    /** Best known member of a pool, from the recorded test results. */
+    fun bestKnown(
+        context: Context, groupId: Long, countryCode: String, preferId: Long = -1,
+    ): ProxyEntity? {
+        val inCountry = SagerDatabase.proxyDao.getByGroup(groupId).filter {
+            GeoStore.countryFor(context, it.requireBean()) ==
+                countryCode.uppercase()
+        }
+        if (inCountry.isEmpty()) return null
+        inCountry.firstOrNull { it.id == preferId }?.let { return it }
+        return inCountry.filter { it.status == 1 && it.ping > 0 }
+            .minByOrNull { it.ping }
+            ?: inCountry.filter { it.ping > 0 }.minByOrNull { it.ping }
+            ?: inCountry.firstOrNull()
     }
 
     /** Speed-test one candidate of the active country. */

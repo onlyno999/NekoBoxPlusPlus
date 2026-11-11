@@ -96,7 +96,7 @@ class MainActivity : ThemedActivity(),
         binding.fab.setOnClickListener {
             if (DataStore.serviceState.canStop) {
                 SagerNet.stopService()
-            } else if (GroupBalancer.armedCountry(this) != null) {
+            } else if (GroupBalancer.armedPairs(this).isNotEmpty()) {
                 // Auto country armed: pick from the recorded results
                 // first so the service starts on the best known node.
                 lifecycleScope.launch {

@@ -4379,8 +4379,6 @@ public class SingBoxOptions {
 
         public Integer tolerance;
 
-        public Boolean race;
-
     }
 
     public static class Rule_DefaultOptions extends Rule {

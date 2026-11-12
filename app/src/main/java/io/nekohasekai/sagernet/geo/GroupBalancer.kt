@@ -163,7 +163,11 @@ object GroupBalancer {
             watchdogJob = scope.launch {
                 while (isActive) {
                     delay(WATCHDOG_MS)
-                    watchdogTick()
+                    try {
+                        watchdogTick()
+                    } catch (e: Exception) {
+                        Log.w(TAG, "watchdog tick failed", e)
+                    }
                 }
             }
         }
@@ -210,7 +214,9 @@ object GroupBalancer {
             SagerDatabase.proxyDao.getByGroup(groupId)
         }.filter {
             it.id != deadId && it.status == 1 && it.ping > 0 &&
-                GeoStore.countryFor(app, it.requireBean()) == cc
+                runCatching {
+                    GeoStore.countryFor(app, it.requireBean())
+                }.getOrNull() == cc
         }
         val best = candidates.minByOrNull { it.ping } ?: run {
             Log.i(TAG, "watchdog failover: no recorded alternative in $cc")
@@ -262,12 +268,14 @@ object GroupBalancer {
                 sweepers.add(scope.launch {
                     while (true) {
                         val profile = sweepQueue.poll() ?: break
-                        val stored = GeoStore.countryFor(app, profile.requireBean())
+                        val bean = runCatching { profile.requireBean() }
+                            .getOrNull() ?: continue
+                        val stored = GeoStore.countryFor(app, bean)
                         val actual = runCatching {
                             GeoTest().doFetchCountry(profile)
                         }.getOrNull()?.uppercase()?.takeIf { it.length == 2 }
                         if (actual != null && actual != stored) {
-                            GeoStore.record(app, profile.requireBean(), actual)
+                            GeoStore.record(app, bean, actual)
                         }
                     }
                 })
@@ -368,7 +376,11 @@ object GroupBalancer {
         // The lit pool is the general line: connect starts on its
         // best known member, wherever the selection sat before.
         val armed = armedPair(app) ?: return
-        val best = bestKnown(app, armed.first, armed.second) ?: return
+        // bestKnown runs a whole-group DB query; callers may sit
+        // on the main thread (connect tap), so resolve off it.
+        val best = withContext(Dispatchers.IO) {
+            bestKnown(app, armed.first, armed.second)
+        } ?: return
         if (DataStore.selectedProxy != best.id) {
             val previous = DataStore.selectedProxy
             DataStore.selectedProxy = best.id
@@ -384,8 +396,9 @@ object GroupBalancer {
         context: Context, groupId: Long, countryCode: String, preferId: Long = -1,
     ): ProxyEntity? {
         val inCountry = SagerDatabase.proxyDao.getByGroup(groupId).filter {
-            GeoStore.countryFor(context, it.requireBean()) ==
-                countryCode.uppercase()
+            runCatching {
+                GeoStore.countryFor(context, it.requireBean())
+            }.getOrNull() == countryCode.uppercase()
         }
         if (inCountry.isEmpty()) return null
         inCountry.firstOrNull { it.id == preferId }?.let { return it }

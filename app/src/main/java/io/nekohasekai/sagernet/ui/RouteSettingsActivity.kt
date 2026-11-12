@@ -131,6 +131,7 @@ class RouteSettingsActivity(
                     data.getLongExtra(ProfileSelectActivity.EXTRA_LB_OUTBOUND, 0)
                 runOnDefaultDispatcher {
                     DataStore.routeOutboundRule = encoded
+                    DataStore.dirty = true
                     onMainDispatcher {
                         outbound.value = "3"
                     }
@@ -144,6 +145,7 @@ class RouteSettingsActivity(
                     )
                 ) ?: return@runOnDefaultDispatcher
                 DataStore.routeOutboundRule = profile.id
+                DataStore.dirty = true
                 onMainDispatcher {
                     outbound.value = "3"
                 }
@@ -288,6 +290,12 @@ class RouteSettingsActivity(
     private suspend fun saveAndExitInner() {
 
         if (!needSave()) {
+            if (DataStore.editingId != 0L) {
+                // Existing rule, nothing changed: the checkmark
+                // simply means "done", not an empty-route error.
+                onMainDispatcher { finish() }
+                return
+            }
             onMainDispatcher {
                 MaterialAlertDialogBuilder(this@RouteSettingsActivity).setTitle(R.string.empty_route)
                     .setMessage(R.string.empty_route_notice)
@@ -316,14 +324,17 @@ class RouteSettingsActivity(
 
     }
 
-    val child by lazy { supportFragmentManager.findFragmentById(R.id.settings) as MyPreferenceFragmentCompat }
+    val child: MyPreferenceFragmentCompat? by lazy {
+        supportFragmentManager.findFragmentById(R.id.settings) as? MyPreferenceFragmentCompat
+    }
 
     override fun onCreateOptionsMenu(menu: Menu): Boolean {
         menuInflater.inflate(R.menu.profile_config_menu, menu)
         return true
     }
 
-    override fun onOptionsItemSelected(item: MenuItem) = child.onOptionsItemSelected(item)
+    override fun onOptionsItemSelected(item: MenuItem): Boolean =
+        child?.onOptionsItemSelected(item) ?: super.onOptionsItemSelected(item)
 
     override fun onBackPressed() {
         if (needSave()) {

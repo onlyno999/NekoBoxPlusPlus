@@ -23,7 +23,9 @@ class GeoTest {
 
     /** Two-letter exit country code for the profile, or null. */
     suspend fun doFetchCountry(profile: ProxyEntity): String? {
-        runCatching {
+        // Cancellation must propagate: swallowing it here would
+        // build a second box for the fallback before dying.
+        try {
             val body = doFetch(profile)
             for (line in body.lineSequence()) {
                 if (line.startsWith("loc=")) {
@@ -31,6 +33,10 @@ class GeoTest {
                         .takeIf { it.length == 2 }?.let { return it }
                 }
             }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            // fall through to the fallback source
         }
         return runCatching {
             val body = TestInstance(profile, fallbackLink, timeout).doFetch()

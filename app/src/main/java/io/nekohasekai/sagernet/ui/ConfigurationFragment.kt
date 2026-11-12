@@ -1490,6 +1490,13 @@ class ConfigurationFragment @JvmOverloads constructor(
                     io.nekohasekai.sagernet.ktx.app, proxyGroup.id, key, !header.expanded
                 )
                 rebuildRows()
+                if (filtering) {
+                    // While filtering, every section renders expanded,
+                    // so the granular range notifications would not
+                    // match the rebuilt rows (adapter inconsistency).
+                    notifyDataSetChanged()
+                    return
+                }
                 notifyItemChanged(headerPos)
                 if (header.expanded) {
                     notifyItemRangeRemoved(headerPos + 1, header.count)
@@ -1670,9 +1677,11 @@ class ConfigurationFragment @JvmOverloads constructor(
 
             override suspend fun onUpdated(profile: ProxyEntity, noTraffic: Boolean) {
                 if (profile.groupId != proxyGroup.id) return
-                val index = rowIndexOf(profile.id)
-                if (index < 0) return
                 configurationListView.post {
+                    // Resolve the index here, on the list thread:
+                    // callers run on IO while rows may be rebuilding.
+                    val index = rowIndexOf(profile.id)
+                    if (index < 0) return@post
                     if (::undoManager.isInitialized) {
                         undoManager.flush()
                     }
@@ -1824,8 +1833,7 @@ class ConfigurationFragment @JvmOverloads constructor(
                             // Long-press drags the section to a new
                             // position; the order is then locked in.
                             if (!select && header.key.isNotEmpty()) {
-                                (parentFragment as? GroupFragment)
-                                    ?.startSectionDrag(this@GeoHeaderHolder)
+                                this@GroupFragment.startSectionDrag(this@GeoHeaderHolder)
                             }
                         }
 
@@ -1892,7 +1900,7 @@ class ConfigurationFragment @JvmOverloads constructor(
 
                 if (select) {
                     view.setOnClickListener {
-                        (requireActivity() as SelectCallback).returnProfile(proxyEntity.id)
+                        (requireActivity() as? SelectCallback)?.returnProfile(proxyEntity.id)
                     }
                 } else {
                     view.setOnClickListener {

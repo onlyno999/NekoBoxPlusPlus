@@ -39,64 +39,75 @@ object GeoStore {
     @Volatile
     private var tryCache: MutableMap<String, Long>? = null
 
+    // Probe workers (up to 100), balancer sweepers and UI reads all
+    // hit these maps concurrently; every access goes through this
+    // one lock (stability pass 1.2.8).
+    private val lock = Any()
+
     private fun prefs(context: Context) =
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
     private fun loadMap(context: Context): MutableMap<String, String> {
-        cache?.let { return it }
-        val out = mutableMapOf<String, String>()
-        val raw = prefs(context).getString(KEY_MAP, null)
-        if (raw != null) {
-            runCatching {
-                val json = JSONObject(raw)
-                val keys = json.keys()
-                while (keys.hasNext()) {
-                    val k = keys.next()
-                    out[k] = json.getString(k)
+        synchronized(lock) {
+            cache?.let { return it }
+            val out = mutableMapOf<String, String>()
+            val raw = prefs(context).getString(KEY_MAP, null)
+            if (raw != null) {
+                runCatching {
+                    val json = JSONObject(raw)
+                    val keys = json.keys()
+                    while (keys.hasNext()) {
+                        val k = keys.next()
+                        out[k] = json.getString(k)
+                    }
                 }
             }
+            cache = out
+            return out
         }
-        cache = out
-        return out
     }
 
     private fun loadTry(context: Context): MutableMap<String, Long> {
-        tryCache?.let { return it }
-        val out = mutableMapOf<String, Long>()
-        val raw = prefs(context).getString(KEY_TRY, null)
-        if (raw != null) {
-            runCatching {
-                val json = JSONObject(raw)
-                val keys = json.keys()
-                while (keys.hasNext()) {
-                    val k = keys.next()
-                    out[k] = json.getLong(k)
+        synchronized(lock) {
+            tryCache?.let { return it }
+            val out = mutableMapOf<String, Long>()
+            val raw = prefs(context).getString(KEY_TRY, null)
+            if (raw != null) {
+                runCatching {
+                    val json = JSONObject(raw)
+                    val keys = json.keys()
+                    while (keys.hasNext()) {
+                        val k = keys.next()
+                        out[k] = json.getLong(k)
+                    }
                 }
             }
+            tryCache = out
+            return out
         }
-        tryCache = out
-        return out
     }
 
     private fun save(context: Context) {
-        val mapJson = JSONObject()
-        loadMap(context).forEach { (k, v) -> mapJson.put(k, v) }
-        val tryJson = JSONObject()
-        loadTry(context).forEach { (k, v) -> tryJson.put(k, v) }
-        prefs(context).edit()
-            .putString(KEY_MAP, mapJson.toString())
-            .putString(KEY_TRY, tryJson.toString())
-            .apply()
+        synchronized(lock) {
+            val mapJson = JSONObject()
+            loadMap(context).forEach { (k, v) -> mapJson.put(k, v) }
+            val tryJson = JSONObject()
+            loadTry(context).forEach { (k, v) -> tryJson.put(k, v) }
+            prefs(context).edit()
+                .putString(KEY_MAP, mapJson.toString())
+                .putString(KEY_TRY, tryJson.toString())
+                .apply()
+        }
     }
 
     fun keyOf(bean: AbstractBean): String =
         "${bean.javaClass.name}|${bean.serverAddress}|${bean.serverPort}"
 
     fun countryFor(context: Context, bean: AbstractBean): String? =
-        loadMap(context)[keyOf(bean)]
+        synchronized(lock) { loadMap(context)[keyOf(bean)] }
 
     fun attemptedRecently(context: Context, bean: AbstractBean): Boolean {
-        val ts = loadTry(context)[keyOf(bean)] ?: return false
+        val ts = synchronized(lock) { loadTry(context)[keyOf(bean)] } ?: return false
         return System.currentTimeMillis() - ts < RETRY_MS
     }
 
@@ -105,9 +116,11 @@ object GeoStore {
         // Only stamp the 24h retry lock on success: a failed probe (storm
         // timeout, transient network) must stay retryable on the next round.
         if (!countryCode.isNullOrBlank()) {
-            loadTry(context)[key] = System.currentTimeMillis()
-            loadMap(context)[key] = countryCode.uppercase()
-            save(context)
+            synchronized(lock) {
+                loadTry(context)[key] = System.currentTimeMillis()
+                loadMap(context)[key] = countryCode.uppercase()
+                save(context)
+            }
         }
     }
 
@@ -193,7 +206,9 @@ object GeoProbe {
     suspend fun probe(context: Context, groupId: Long) = withContext(Dispatchers.IO) {
         val profiles = SagerDatabase.proxyDao.getByGroup(groupId)
         val targets = profiles.filter { profile ->
-            val bean = profile.requireBean()
+            // A row whose bean fails to build must not kill the probe.
+            val bean = runCatching { profile.requireBean() }.getOrNull()
+                ?: return@filter false
             GeoStore.countryFor(context, bean) == null &&
                 !GeoStore.attemptedRecently(context, bean)
         }
@@ -203,9 +218,10 @@ object GeoProbe {
     }
 
     /**
-     * Probe the given profiles' exit countries, gently: at most two
-     * box instances at a time, and the whole phase yields the moment
-     * the user starts a manual connection test.
+     * Probe the given profiles' exit countries: at most 16 box
+     * instances at a time (each one is a full native box; the old
+     * 100-way fan-out spiked memory), and the whole phase yields
+     * the moment the user starts a manual connection test.
      */
     suspend fun probeProfiles(
         context: Context,
@@ -216,12 +232,13 @@ object GeoProbe {
             if (targets.isEmpty()) return@withContext
             val queue = ConcurrentLinkedQueue(targets)
             val jobs = mutableListOf<kotlinx.coroutines.Job>()
-            repeat(minOf(100, targets.size)) {
+            repeat(minOf(16, targets.size)) {
                 jobs.add(launch {
                     while (true) {
                         if (DataStore.runningTest) break
                         val profile = queue.poll() ?: break
-                        val bean = profile.requireBean()
+                        val bean = runCatching { profile.requireBean() }
+                            .getOrNull() ?: continue
                         val cc = runCatching {
                             GeoTest().doFetchCountry(profile)
                         }.getOrNull()

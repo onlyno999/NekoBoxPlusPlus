@@ -34,7 +34,7 @@ abstract class SagerDatabase : RoomDatabase() {
             SagerNet.application.getDatabasePath(Key.DB_PROFILE).parentFile?.mkdirs()
             Room.databaseBuilder(SagerNet.application, SagerDatabase::class.java, Key.DB_PROFILE)
 //                .addMigrations(*SagerDatabase_Migrations.build())
-                .setJournalMode(JournalMode.TRUNCATE)
+                .setJournalMode(JournalMode.WRITE_AHEAD_LOGGING)
                 .allowMainThreadQueries()
                 .enableMultiInstanceInvalidation()
                 .fallbackToDestructiveMigration()

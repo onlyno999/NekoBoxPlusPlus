@@ -1151,16 +1151,23 @@ class ConfigurationFragment @JvmOverloads constructor(
             // a stale 自动中 next to the real one.
             adapter?.notifyDataSetChanged()
 
+            if (!::configurationListView.isInitialized) {
+                onViewCreated(requireView(), null)
+            }
+            // Not else-if: a view (re)created just above -- the
+            // process-death restore path lands here -- must still
+            // get its initial load in this same pass, or the page
+            // stays empty until the next resume.
             if (::configurationListView.isInitialized && configurationListView.size == 0) {
                 configurationListView.adapter = adapter
                 runOnDefaultDispatcher {
                     adapter?.reloadProfiles()
                 }
-            } else if (!::configurationListView.isInitialized) {
-                onViewCreated(requireView(), null)
             }
             checkOrderMenu()
-            configurationListView.requestFocus()
+            if (::configurationListView.isInitialized) {
+                configurationListView.requestFocus()
+            }
         }
 
         fun checkOrderMenu() {
@@ -1376,7 +1383,11 @@ class ConfigurationFragment @JvmOverloads constructor(
                 val ctx = io.nekohasekai.sagernet.ktx.app
                 val countries = configurationIdList.map { id ->
                     configurationList[id]?.let {
-                        GeoStore.countryFor(ctx, it.requireBean())
+                        // A row whose bean fails to build lands in
+                        // 未检测 instead of crashing the whole fill.
+                        runCatching {
+                            GeoStore.countryFor(ctx, it.requireBean())
+                        }.getOrNull()
                     }
                 }
                 // Sectioned in select mode too: the route-rule picker

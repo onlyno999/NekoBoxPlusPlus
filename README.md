@@ -117,7 +117,7 @@ contact us to add it.
 
 USDT TRC20
 
-`TRhnA7SXE5Sap5gSG3ijxRmdYFiD4KRhPs`
+`TNZYEoTHuriimnJSjBY6mreraMcrgSzNKw`
 
 XMR
 

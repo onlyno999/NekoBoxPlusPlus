@@ -250,6 +250,18 @@ class ConfigurationFragment @JvmOverloads constructor(
         DataStore.profileCacheStore.registerChangeListener(this)
     }
 
+    override fun onResume() {
+        super.onResume()
+
+        // Foreground return with a still-empty pager means the
+        // initial group load never landed (its result post was
+        // dropped, or the query stalled behind the :bg process):
+        // ask again instead of sitting on a blank page.
+        if (::adapter.isInitialized && adapter.groupList.isEmpty()) {
+            adapter.reload(true)
+        }
+    }
+
     override fun onPreferenceDataStoreChanged(store: PreferenceDataStore, key: String) {
         runOnMainDispatcher {
             // editingGroup
@@ -989,7 +1001,15 @@ class ConfigurationFragment @JvmOverloads constructor(
                     }
                 }
 
-                val runFunc = if (now) activity?.let { it::runOnUiThread } else groupPager::post
+                // If the activity reference is gone by the time
+                // the query lands, fall back to the pager's own
+                // queue: dropping the result leaves the pager
+                // empty for good.
+                val runFunc = if (now) {
+                    activity?.let { it::runOnUiThread } ?: groupPager::post
+                } else {
+                    groupPager::post
+                }
                 if (runFunc != null) {
                     runFunc {
                         groupList = newGroupList

@@ -131,7 +131,21 @@ class BackupFragment : NamedFragment(R.layout.layout_backup) {
         binding.webdavUser.setText(webdavPrefs.getString("user", ""))
         binding.webdavPass.setText(webdavPrefs.getString("pass", ""))
 
-        fun webdavTarget(): String? {
+        // The WebDAV form stays folded away until its
+        // header is tapped, so credentials are not sitting
+        // on the page in plain sight.
+        binding.webdavHeader.setOnClickListener {
+            val open = binding.webdavBody.visibility == android.view.View.VISIBLE
+            binding.webdavBody.visibility =
+                if (open) android.view.View.GONE else android.view.View.VISIBLE
+            binding.webdavHeader.text = if (open) "WebDAV 备份 ▸" else "WebDAV 备份 ▾"
+        }
+
+        // The folder holding the backups. Uploads are
+        // stored per day (nekoboxpp_backup_<date>.json);
+        // an explicitly typed .json file name resolves to
+        // its containing folder too.
+        fun webdavFolder(): String? {
             val raw = binding.webdavUrl.text.toString().trim()
             if (raw.isBlank()) return null
             webdavPrefs.edit()
@@ -148,17 +162,23 @@ class BackupFragment : NamedFragment(R.layout.layout_backup) {
             ) {
                 base = raw.trimEnd('/') + "/NekoBox++/"
             }
-            return if (base.endsWith("/")) base + "nekoboxpp_backup.json" else base
+            if (base.endsWith(".json")) {
+                base = base.substringBeforeLast('/') + "/"
+            }
+            return if (base.endsWith("/")) base else base + "/"
         }
 
         binding.actionWebdavUpload.setOnClickListener {
-            val target = webdavTarget()
-            if (target == null) {
+            val folder = webdavFolder()
+            if (folder == null) {
                 snackbar("先填 WebDAV 地址").show()
                 return@setOnClickListener
             }
             val user = binding.webdavUser.text.toString()
             val pass = binding.webdavPass.text.toString()
+            val date = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US)
+                .format(Date())
+            val fileName = "nekoboxpp_backup_$date.json"
             runOnDefaultDispatcher {
                 try {
                     val data = doBackup(
@@ -166,16 +186,10 @@ class BackupFragment : NamedFragment(R.layout.layout_backup) {
                         binding.backupRules.isChecked,
                         binding.backupSettings.isChecked
                     )
-                    if (target.endsWith("/nekoboxpp_backup.json")) {
-                        // Make sure the containing folder exists first
-                        // (Jianguoyun root fallback, fresh folders).
-                        WebDavBackup.mkcol(
-                            target.removeSuffix("nekoboxpp_backup.json"), user, pass
-                        )
-                    }
-                    WebDavBackup.put(target, user, pass, data)
+                    WebDavBackup.mkcol(folder, user, pass)
+                    WebDavBackup.put(folder + fileName, user, pass, data)
                     onMainDispatcher {
-                        snackbar("WebDAV 上传完成").show()
+                        snackbar("WebDAV 上传完成：$fileName").show()
                     }
                 } catch (e: Exception) {
                     Logs.w(e)
@@ -187,8 +201,8 @@ class BackupFragment : NamedFragment(R.layout.layout_backup) {
         }
 
         binding.actionWebdavDownload.setOnClickListener {
-            val target = webdavTarget()
-            if (target == null) {
+            val folder = webdavFolder()
+            if (folder == null) {
                 snackbar("先填 WebDAV 地址").show()
                 return@setOnClickListener
             }
@@ -196,8 +210,43 @@ class BackupFragment : NamedFragment(R.layout.layout_backup) {
             val pass = binding.webdavPass.text.toString()
             runOnDefaultDispatcher {
                 try {
-                    val raw = WebDavBackup.get(target, user, pass)
-                    importFromRaw(raw)
+                    val names = WebDavBackup.list(folder, user, pass)
+                        .filter {
+                            it.startsWith("nekoboxpp_backup") && it.endsWith(".json")
+                        }
+                        .sortedDescending()
+                    if (names.isEmpty()) {
+                        onMainDispatcher {
+                            snackbar("服务器上没有备份文件").show()
+                        }
+                        return@runOnDefaultDispatcher
+                    }
+                    onMainDispatcher {
+                        com.google.android.material.dialog.MaterialAlertDialogBuilder(
+                            requireContext()
+                        )
+                            .setTitle("选择要恢复的备份")
+                            .setItems(names.toTypedArray()) { _, which ->
+                                val chosen = names[which]
+                                runOnDefaultDispatcher {
+                                    try {
+                                        val raw = WebDavBackup.get(
+                                            folder + chosen, user, pass
+                                        )
+                                        importFromRaw(raw)
+                                    } catch (e: Exception) {
+                                        Logs.w(e)
+                                        onMainDispatcher {
+                                            snackbar(
+                                                "WebDAV 下载失败：" + e.readableMessage
+                                            ).show()
+                                        }
+                                    }
+                                }
+                            }
+                            .setNegativeButton(android.R.string.cancel, null)
+                            .show()
+                    }
                 } catch (e: Exception) {
                     Logs.w(e)
                     onMainDispatcher {

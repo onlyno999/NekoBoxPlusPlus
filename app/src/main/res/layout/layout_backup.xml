@@ -75,16 +75,26 @@
         android:textColor="?whiteOrTextPrimary" />
 
     <TextView
-        android:layout_width="wrap_content"
+        android:id="@+id/webdav_header"
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginTop="24dp"
-        android:text="WebDAV 备份"
+        android:paddingTop="8dp"
+        android:paddingBottom="8dp"
+        android:text="WebDAV 备份 ▸"
         android:textAppearance="?attr/textAppearanceSubtitle2" />
+
+    <LinearLayout
+        android:id="@+id/webdav_body"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:visibility="gone">
 
     <TextView
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="填服务器上备份文件的完整地址（以 / 结尾时自动补文件名 nekoboxpp_backup.json）"
+        android:text="填服务器上备份文件夹的地址；上传按日期存一份（nekoboxpp_backup_日期.json），下载时选要恢复哪一天的"
         android:textColor="?android:textColorTertiary" />
 
     <EditText
@@ -126,6 +136,8 @@
         android:layout_height="wrap_content"
         android:text="从 WebDAV 下载并导入"
         android:textColor="?whiteOrTextPrimary" />
+
+    </LinearLayout>
 
 </LinearLayout>
 

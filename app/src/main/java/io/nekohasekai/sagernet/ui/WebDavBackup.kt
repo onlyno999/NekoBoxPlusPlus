@@ -70,6 +70,33 @@ object WebDavBackup {
             }
     }
 
+    /** Lists the file names inside a WebDAV folder (PROPFIND, depth 1). */
+    fun list(url: String, user: String, pass: String): List<String> {
+        val body = ("<?xml version=\"1.0\" encoding=\"utf-8\"?>" +
+            "<propfind xmlns=\"DAV:\"><prop><displayname/></prop></propfind>")
+            .toRequestBody("application/xml".toMediaType())
+        val req = request(url, user, pass)
+            .method("PROPFIND", body)
+            .header("Depth", "1")
+            .build()
+        client().newCall(req).execute().use { resp ->
+            if (!resp.isSuccessful) throw IOException("HTTP " + resp.code)
+            val xml = resp.body?.string() ?: throw IOException("empty body")
+            val names = mutableListOf<String>()
+            val hrefRe = Regex("href[^>]*>([^<]+)<", RegexOption.IGNORE_CASE)
+            for (m in hrefRe.findAll(xml)) {
+                val href = m.groupValues[1].trim()
+                val name = runCatching {
+                    java.net.URLDecoder.decode(
+                        href.trimEnd('/').substringAfterLast('/'), "UTF-8"
+                    )
+                }.getOrNull() ?: continue
+                if (name.isNotEmpty()) names.add(name)
+            }
+            return names
+        }
+    }
+
     /** Creates a collection; failures (already exists etc.) are ignored. */
     fun mkcol(url: String, user: String, pass: String) {
         try {

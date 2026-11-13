@@ -1,0 +1,36 @@
+site_name: NekoBox++
+site_description: NekoBox++ 文档站
+site_url: https://onlyno999.github.io/NekoBoxPlusPlus/
+repo_url: https://github.com/onlyno999/NekoBoxPlusPlus
+repo_name: onlyno999/NekoBoxPlusPlus
+theme:
+  name: material
+  language: zh
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: pink
+      accent: pink
+      toggle:
+        icon: material/weather-night
+        name: 切换到深色模式
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: pink
+      accent: pink
+      toggle:
+        icon: material/weather-sunny
+        name: 切换到浅色模式
+  features:
+    - navigation.instant
+    - content.code.copy
+nav:
+  - 首页: index.md
+  - 下载: download.md
+  - 使用文档: guide.md
+  - 插件: nb4a-plugin.md
+  - 路由: nb4a-route.md
+markdown_extensions:
+  - admonition
+  - toc:
+      permalink: true

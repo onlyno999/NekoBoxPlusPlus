@@ -15,3 +15,20 @@
 - 某个（分组＋国家）的节点池（点分区的「自动」）
 
 绑池后这条规则的流量在池内自动选最快的节点，和主连接走哪条互不影响。每条规则可以绑不同的池。
+
+## 谷歌 Play 商店下载规则（中国规则必加）
+
+开了「中国域名 / 中国 IP 直连」这类规则后，Play 商店会无法下载、或下载到 99% 卡住不动——商店用的几个谷歌域名被判成了直连。
+
+解决办法：自己加一条规则，把下面这些域名指到**代理**，并把这条规则放在中国规则**前面**：
+
+- 类型：`domain`（域名）
+- 内容（整段复制粘贴）：
+
+```
+googleapis.com,connectivitycheck.gstatic.com,www.google.com,play-fe.googleapis.com,play-lh.googleusercontent.com,playstoregatewayadapter-pa.googleapis.com,services.googleapis.cn,xn--ngstr-lra8j.com,play.googleapis.com,mtalk.google.com
+```
+
+- 出口：代理（也可以绑一个节点池）
+
+加完重连一次，商店就能正常下载了。不加这条、又开着中国域名/中国 IP 规则的话，商店就是下不了。

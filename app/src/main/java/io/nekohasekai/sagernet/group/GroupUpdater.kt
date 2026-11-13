@@ -166,6 +166,12 @@ abstract class GroupUpdater {
                     // Remember whether the profile the main
                     // connection is using lives in this group, so
                     // its disappearance in the update is caught.
+                    val idsBefore = withContext(Dispatchers.IO) {
+                        runCatching {
+                            SagerDatabase.proxyDao.getByGroup(proxyGroup.id)
+                                .map { it.id }.toSet()
+                        }.getOrDefault(emptySet())
+                    }
                     val selectedBefore = DataStore.selectedProxy
                     val selectedWasHere = withContext(Dispatchers.IO) {
                         runCatching {
@@ -188,6 +194,25 @@ abstract class GroupUpdater {
                             runCatching {
                                 io.nekohasekai.sagernet.geo.GroupBalancer
                                     .repickSelectionForGroup(proxyGroup.id)
+                            }
+                        }
+                    }
+                    // If this update removed profiles and a
+                    // route rule load-balances over this group,
+                    // reload so the pool drops the vanished
+                    // members and re-picks a carrier.
+                    run {
+                        val idsAfter = withContext(Dispatchers.IO) {
+                            runCatching {
+                                SagerDatabase.proxyDao
+                                    .getByGroup(proxyGroup.id)
+                                    .map { it.id }.toSet()
+                            }.getOrDefault(emptySet())
+                        }
+                        if ((idsBefore - idsAfter).isNotEmpty()) {
+                            runCatching {
+                                io.nekohasekai.sagernet.geo.GroupBalancer
+                                    .onPoolMembersDeleted(setOf(proxyGroup.id))
                             }
                         }
                     }

@@ -564,6 +564,11 @@ class ConfigurationFragment @JvmOverloads constructor(
                                                 }
                                             }
                                         }
+                                        runCatching {
+                                            GroupBalancer.onPoolMembersDeleted(
+                                                toClear.map { it.groupId }.toSet()
+                                            )
+                                        }
                                     }
                                 }
                                 .setNegativeButton(R.string.no, null)
@@ -623,6 +628,11 @@ class ConfigurationFragment @JvmOverloads constructor(
                                                     GroupBalancer.repickSelectionForGroup(gid)
                                                 }
                                             }
+                                        }
+                                        runCatching {
+                                            GroupBalancer.onPoolMembersDeleted(
+                                                toClear.map { it.groupId }.toSet()
+                                            )
                                         }
                                     }
                                 }
@@ -1707,6 +1717,17 @@ class ConfigurationFragment @JvmOverloads constructor(
                     if (profiles.any { it.id == selectedBefore }) {
                         runCatching {
                             GroupBalancer.repickSelectionForGroup(proxyGroup.id)
+                        }
+                    }
+                    // If a route rule load-balances over this
+                    // group, the running pool still lists the
+                    // deleted profiles as members; reload so
+                    // the pool drops them and re-picks a carrier.
+                    if (GroupBalancer.onPoolMembersDeleted(setOf(proxyGroup.id))) {
+                        configurationListView.post {
+                            (activity as? MainActivity)?.snackbar(
+                                "分流池节点已删除，已刷新连接，池子会自动改选"
+                            )?.show()
                         }
                     }
                 }

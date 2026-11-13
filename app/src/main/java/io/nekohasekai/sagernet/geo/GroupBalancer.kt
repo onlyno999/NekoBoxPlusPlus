@@ -322,6 +322,37 @@ object GroupBalancer {
     }
 
     /**
+     * Profiles were just deleted for real. When a route rule
+     * load-balances over a pool of one of the affected groups,
+     * the running config still lists the deleted profiles as
+     * pool members: routed traffic keeps aiming at a ghost, no
+     * surviving member takes over and none shows any usage.
+     * Reload so the pool is rebuilt from the surviving members
+     * and the core re-picks a carrier. True when reloaded.
+     */
+    suspend fun onPoolMembersDeleted(groupIds: Set<Long>): Boolean {
+        if (groupIds.isEmpty()) return false
+        if (!DataStore.serviceState.canStop) return false
+        val referenced = withContext(Dispatchers.IO) {
+            runCatching {
+                SagerDatabase.rulesDao.enabledRules().any { rule ->
+                    LbRef.isLb(rule.outbound) &&
+                        LbRef.groupId(rule.outbound) in groupIds
+                }
+            }.getOrDefault(false)
+        }
+        if (!referenced) return false
+        Log.i(TAG, "pool member deleted; reloading so the pool re-picks")
+        runCatching {
+            io.nekohasekai.sagernet.ktx.Logs.i(
+                "pool member deleted; reloading so the pool re-picks"
+            )
+        }
+        SagerNet.reloadService()
+        return true
+    }
+
+    /**
      * Instant failover from the recorded test history: pick the
      * fastest other member of the active country whose last recorded
      * test passed, and switch to it right away. No testing happens

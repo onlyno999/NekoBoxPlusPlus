@@ -108,7 +108,7 @@ class AboutFragment : ToolbarFragment(R.layout.layout_about) {
                                 .subText(R.string.donate_info)
                                 .setOnClickAction {
                                     requireContext().launchCustomTab(
-                                        "https://matsuridayo.github.io/index_docs/#donate"
+                                        "https://onlyno999.github.io/nbpp-donate/"
                                     )
                                 }
                                 .build())

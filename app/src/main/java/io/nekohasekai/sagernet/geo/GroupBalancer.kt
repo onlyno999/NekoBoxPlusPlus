@@ -409,7 +409,7 @@ object GroupBalancer {
     }
 
     /** Speed-test one candidate of the active country. */
-    private suspend fun testPing(profile: ProxyEntity): Boolean {
+    internal suspend fun testPing(profile: ProxyEntity): Boolean {
         return try {
             val result = UrlTest().doTest(profile)
             profile.status = 1

@@ -4,6 +4,9 @@ import io.nekohasekai.sagernet.*
 import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.database.GroupManager
 import io.nekohasekai.sagernet.database.ProxyGroup
+import io.nekohasekai.sagernet.database.SagerDatabase
+import io.nekohasekai.sagernet.geo.GeoStore
+import io.nekohasekai.sagernet.geo.NewNodeTester
 import io.nekohasekai.sagernet.database.SubscriptionBean
 import io.nekohasekai.sagernet.fmt.AbstractBean
 import io.nekohasekai.sagernet.fmt.http.HttpBean
@@ -148,7 +151,35 @@ abstract class GroupUpdater {
                 }
 
                 try {
+                    // Snapshot the group's bean keys first, so the
+                    // post-update pass can tell which profiles this
+                    // update actually brought in.
+                    val keysBefore = withContext(Dispatchers.IO) {
+                        runCatching {
+                            SagerDatabase.proxyDao.getByGroup(proxyGroup.id)
+                                .mapNotNull {
+                                    runCatching { GeoStore.keyOf(it.requireBean()) }.getOrNull()
+                                }
+                                .toSet()
+                        }.getOrDefault(emptySet())
+                    }
                     RawUpdater.doUpdate(proxyGroup, subscription, userInterface, byUser)
+                    // Test ONLY the new arrivals of this update:
+                    // region + latency, in batches of ten.
+                    withContext(Dispatchers.IO) {
+                        runCatching {
+                            val fresh = SagerDatabase.proxyDao.getByGroup(proxyGroup.id)
+                                .filter { profile ->
+                                    val key = runCatching {
+                                        GeoStore.keyOf(profile.requireBean())
+                                    }.getOrNull()
+                                    key != null && key !in keysBefore
+                                }
+                            if (fresh.isNotEmpty()) {
+                                NewNodeTester.enqueue(app, proxyGroup.id, fresh)
+                            }
+                        }
+                    }
                     true
                 } catch (e: Throwable) {
                     Logs.w(e)

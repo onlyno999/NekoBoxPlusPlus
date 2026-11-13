@@ -97,6 +97,16 @@ object WebDavBackup {
         }
     }
 
+    /** Deletes one file; a 404 (already gone) counts as success. */
+    fun delete(url: String, user: String, pass: String) {
+        client().newCall(request(url, user, pass).delete().build())
+            .execute().use { resp ->
+                if (!resp.isSuccessful && resp.code != 404) {
+                    throw IOException("HTTP " + resp.code)
+                }
+            }
+    }
+
     /** Creates a collection; failures (already exists etc.) are ignored. */
     fun mkcol(url: String, user: String, pass: String) {
         try {

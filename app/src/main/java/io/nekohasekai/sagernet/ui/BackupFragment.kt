@@ -200,6 +200,71 @@ class BackupFragment : NamedFragment(R.layout.layout_backup) {
             }
         }
 
+        binding.actionWebdavDelete.setOnClickListener {
+            val folder = webdavFolder()
+            if (folder == null) {
+                snackbar("先填 WebDAV 地址").show()
+                return@setOnClickListener
+            }
+            val user = binding.webdavUser.text.toString()
+            val pass = binding.webdavPass.text.toString()
+            runOnDefaultDispatcher {
+                try {
+                    val names = WebDavBackup.list(folder, user, pass)
+                        .filter {
+                            it.startsWith("nekoboxpp_backup") && it.endsWith(".json")
+                        }
+                        .sortedDescending()
+                    if (names.isEmpty()) {
+                        onMainDispatcher {
+                            snackbar("服务器上没有备份文件").show()
+                        }
+                        return@runOnDefaultDispatcher
+                    }
+                    onMainDispatcher {
+                        val checked = BooleanArray(names.size)
+                        com.google.android.material.dialog.MaterialAlertDialogBuilder(
+                            requireContext()
+                        )
+                            .setTitle("选择要删除的备份")
+                            .setMultiChoiceItems(
+                                names.toTypedArray(), checked
+                            ) { _, which, isChecked ->
+                                checked[which] = isChecked
+                            }
+                            .setPositiveButton("删除") { _, _ ->
+                                val chosen = names.filterIndexed { i, _ -> checked[i] }
+                                if (chosen.isEmpty()) return@setPositiveButton
+                                runOnDefaultDispatcher {
+                                    try {
+                                        chosen.forEach {
+                                            WebDavBackup.delete(folder + it, user, pass)
+                                        }
+                                        onMainDispatcher {
+                                            snackbar("已删除 ${chosen.size} 个备份").show()
+                                        }
+                                    } catch (e: Exception) {
+                                        Logs.w(e)
+                                        onMainDispatcher {
+                                            snackbar(
+                                                "删除失败：" + e.readableMessage
+                                            ).show()
+                                        }
+                                    }
+                                }
+                            }
+                            .setNegativeButton(android.R.string.cancel, null)
+                            .show()
+                    }
+                } catch (e: Exception) {
+                    Logs.w(e)
+                    onMainDispatcher {
+                        snackbar("读取备份列表失败：" + e.readableMessage).show()
+                    }
+                }
+            }
+        }
+
         binding.actionWebdavDownload.setOnClickListener {
             val folder = webdavFolder()
             if (folder == null) {

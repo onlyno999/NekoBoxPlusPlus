@@ -1943,7 +1943,7 @@ class ConfigurationFragment @JvmOverloads constructor(
                         if (GroupBalancer.armedPair(view.context) != null) {
                             Toast.makeText(
                                 view.context,
-                                "自动模式：先关掉自动模式才能手动选节点",
+                                "自动模式：先关掉自动才能手动选择节点",
                                 Toast.LENGTH_SHORT
                             ).show()
                             return@setOnClickListener

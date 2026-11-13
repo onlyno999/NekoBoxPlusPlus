@@ -551,10 +551,18 @@ class ConfigurationFragment @JvmOverloads constructor(
                                         }
                                     }
                                     runOnDefaultDispatcher {
+                                        val selectedBefore = DataStore.selectedProxy
                                         for (profile in toClear) {
                                             ProfileManager.deleteProfile2(
                                                 profile.groupId, profile.id
                                             )
+                                        }
+                                        if (toClear.any { it.id == selectedBefore }) {
+                                            toClear.firstOrNull()?.groupId?.let { gid ->
+                                                runCatching {
+                                                    GroupBalancer.repickSelectionForGroup(gid)
+                                                }
+                                            }
                                         }
                                     }
                                 }
@@ -603,10 +611,18 @@ class ConfigurationFragment @JvmOverloads constructor(
                                         }
                                     }
                                     runOnDefaultDispatcher {
+                                        val selectedBefore = DataStore.selectedProxy
                                         for (profile in toClear) {
                                             ProfileManager.deleteProfile2(
                                                 profile.groupId, profile.id
                                             )
+                                        }
+                                        if (toClear.any { it.id == selectedBefore }) {
+                                            toClear.firstOrNull()?.groupId?.let { gid ->
+                                                runCatching {
+                                                    GroupBalancer.repickSelectionForGroup(gid)
+                                                }
+                                            }
                                         }
                                     }
                                 }
@@ -1682,8 +1698,16 @@ class ConfigurationFragment @JvmOverloads constructor(
             override fun commit(actions: List<Pair<Int, ProxyEntity>>) {
                 val profiles = actions.map { it.second }
                 runOnDefaultDispatcher {
+                    val selectedBefore = DataStore.selectedProxy
                     for (entity in profiles) {
                         ProfileManager.deleteProfile(entity.groupId, entity.id)
+                    }
+                    // Deleting the node in use must not strand
+                    // the connection: re-pick the group's best.
+                    if (profiles.any { it.id == selectedBefore }) {
+                        runCatching {
+                            GroupBalancer.repickSelectionForGroup(proxyGroup.id)
+                        }
                     }
                 }
             }

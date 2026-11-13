@@ -163,7 +163,34 @@ abstract class GroupUpdater {
                                 .toSet()
                         }.getOrDefault(emptySet())
                     }
+                    // Remember whether the profile the main
+                    // connection is using lives in this group, so
+                    // its disappearance in the update is caught.
+                    val selectedBefore = DataStore.selectedProxy
+                    val selectedWasHere = withContext(Dispatchers.IO) {
+                        runCatching {
+                            SagerDatabase.proxyDao
+                                .getById(selectedBefore)?.groupId
+                        }.getOrNull() == proxyGroup.id
+                    }
                     RawUpdater.doUpdate(proxyGroup, subscription, userInterface, byUser)
+                    // The update replaced the node in use: re-pick
+                    // the best remaining node of the group at once
+                    // instead of stranding the connection.
+                    if (selectedWasHere) {
+                        val stillThere = withContext(Dispatchers.IO) {
+                            runCatching {
+                                SagerDatabase.proxyDao
+                                    .getById(selectedBefore)
+                            }.getOrNull() != null
+                        }
+                        if (!stillThere) {
+                            runCatching {
+                                io.nekohasekai.sagernet.geo.GroupBalancer
+                                    .repickSelectionForGroup(proxyGroup.id)
+                            }
+                        }
+                    }
                     // Test ONLY the new arrivals of this update:
                     // region + latency, in batches of ten.
                     withContext(Dispatchers.IO) {

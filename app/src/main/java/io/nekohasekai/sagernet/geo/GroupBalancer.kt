@@ -215,6 +215,21 @@ object GroupBalancer {
         val armed = armedPair(app) ?: return
         val service = serviceProvider?.invoke() ?: return
         val selectedId = DataStore.selectedProxy
+        val selectedExists = withContext(Dispatchers.IO) {
+            selectedId != 0L &&
+                SagerDatabase.proxyDao.getById(selectedId) != null
+        }
+        if (!selectedExists) {
+            // The node in use was deleted (by hand, or by a
+            // subscription update that replaced it): fail over
+            // to the best recorded standby of the armed pool
+            // instead of leaving the line aimed at a ghost.
+            Log.i(TAG, "watchdog: selected profile is gone; failing over")
+            failOverFromRecord(armed.first, selectedId)
+            healthForSelected = -1L
+            scope.launch { runSpeedRound() }
+            return
+        }
         if (healthForSelected != selectedId) {
             healthForSelected = selectedId
             runCatching { service.resetDialHealth(MAIN_LINE_TAG) }
@@ -257,6 +272,47 @@ object GroupBalancer {
         ProfileManager.postUpdate(previous)
         ProfileManager.postUpdate(best.id)
         Log.i(TAG, "arm steer -> ${best.requireBean().displayName()} (${best.ping}ms)")
+        if (DataStore.serviceState.canStop) {
+            SagerNet.reloadService()
+        }
+    }
+
+    /**
+     * The selected profile has just been deleted (by hand, or by
+     * a subscription update that replaced it). Point the main
+     * connection at the best remaining node instead of leaving
+     * the selection empty or dangling: inside the armed pool
+     * when this group holds it, otherwise the group's best
+     * recorded node. Reloads the service when it is running.
+     */
+    suspend fun repickSelectionForGroup(groupId: Long) {
+        val all = withContext(Dispatchers.IO) {
+            SagerDatabase.proxyDao.getByGroup(groupId)
+        }
+        if (all.isEmpty()) return
+        val armed = armedPair(app)
+        val inPool = if (armed != null && armed.first == groupId) {
+            all.filter {
+                GeoStore.countryFor(app, it.requireBean()) == armed.second
+            }
+        } else {
+            emptyList()
+        }
+        val candidates = inPool.ifEmpty { all }
+        val best = candidates.filter { it.status == 1 && it.ping > 0 }
+            .minByOrNull { it.ping }
+            ?: candidates.filter { it.ping > 0 }.minByOrNull { it.ping }
+            ?: candidates.first()
+        val previous = DataStore.selectedProxy
+        if (previous == best.id) return
+        DataStore.selectedProxy = best.id
+        ProfileManager.postUpdate(previous)
+        ProfileManager.postUpdate(best.id)
+        Log.i(
+            TAG,
+            "selection lost; re-picked " +
+                best.requireBean().displayName() + " (" + best.ping + "ms)"
+        )
         if (DataStore.serviceState.canStop) {
             SagerNet.reloadService()
         }

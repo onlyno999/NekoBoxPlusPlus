@@ -1088,6 +1088,10 @@ public class SingBoxOptions {
 
         public String url;
 
+        public String download_detour;
+
+        public String update_interval;
+
     }
 
     public static class DefaultRule extends SingBoxOption {

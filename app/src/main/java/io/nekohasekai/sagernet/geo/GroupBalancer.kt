@@ -285,10 +285,13 @@ object GroupBalancer {
      * when this group holds it, otherwise the group's best
      * recorded node. Reloads the service when it is running.
      */
-    suspend fun repickSelectionForGroup(groupId: Long) {
+    suspend fun repickSelectionForGroup(
+        groupId: Long,
+        excludeIds: Set<Long> = emptySet(),
+    ) {
         val all = withContext(Dispatchers.IO) {
             SagerDatabase.proxyDao.getByGroup(groupId)
-        }
+        }.filter { it.id !in excludeIds }
         if (all.isEmpty()) return
         val armed = armedPair(app)
         val inPool = if (armed != null && armed.first == groupId) {

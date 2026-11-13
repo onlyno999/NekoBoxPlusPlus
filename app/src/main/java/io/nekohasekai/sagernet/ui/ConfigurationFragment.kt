@@ -2105,6 +2105,20 @@ class ConfigurationFragment @JvmOverloads constructor(
                         val index = it.configurationIdList.indexOf(proxyEntity.id)
                         it.remove(index)
                         undoManager.remove(index to proxyEntity)
+                        if (proxyEntity.id == DataStore.selectedProxy) {
+                            // The real delete waits behind the undo
+                            // snackbar, which may not commit for a
+                            // long time; do not leave the connection
+                            // aimed at a node that is already gone
+                            // from the list. Move it now.
+                            runOnDefaultDispatcher {
+                                runCatching {
+                                    GroupBalancer.repickSelectionForGroup(
+                                        proxyGroup.id, setOf(proxyEntity.id)
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
 

@@ -28,7 +28,7 @@
 # NekoBox for Android
 
 [![API](https://img.shields.io/badge/API-21%2B-brightgreen.svg?style=flat)](https://android-arsenal.com/api?level=21)
-[![Releases](https://img.shields.io/github/v/release/MatsuriDayo/NekoBoxForAndroid)](https://github.com/MatsuriDayo/NekoBoxForAndroid/releases)
+[![Releases](https://img.shields.io/github/v/release/onlyno999/NekoBoxPlusPlus)](https://github.com/onlyno999/NekoBoxPlusPlus/releases)
 [![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-orange.svg)](https://www.gnu.org/licenses/gpl-3.0)
 
 sing-box / universal proxy toolchain for Android.
@@ -37,7 +37,7 @@ sing-box / universal proxy toolchain for Android.
 
 ## 下载 / Downloads
 
-[![GitHub All Releases](https://img.shields.io/github/downloads/Matsuridayo/NekoBoxForAndroid/total?label=downloads-total&logo=github&style=flat-square)](https://github.com/Matsuridayo/NekoBoxForAndroid/releases)
+[![GitHub All Releases](https://img.shields.io/github/downloads/onlyno999/NekoBoxPlusPlus/total?label=downloads-total&logo=github&style=flat-square)](https://github.com/Matsuridayo/NekoBoxForAndroid/releases)
 
 [GitHub Releases 下载](https://github.com/Matsuridayo/NekoBoxForAndroid/releases)
 
@@ -48,11 +48,11 @@ source version. Please do not download it.**
 
 ## 更新日志 & Telegram 发布频道 / Changelog & Telegram Channel
 
-https://t.me/Matsuridayo
+https://t.me/nekbox999
 
 ## 项目主页 & 文档 / Homepage & Documents
 
-https://matsuridayo.github.io
+https://onlyno999.github.io/NekoBoxPlusPlus/
 
 ## 支持的代理协议 / Supported Proxy Protocols
 
@@ -72,9 +72,9 @@ https://matsuridayo.github.io
 * NaïveProxy (naive-plugin)
 * Mieru (mieru-plugin)
 
-请到[这里](https://matsuridayo.github.io/nb4a-plugin/)下载插件以获得完整的代理支持.
+请到[这里](https://onlyno999.github.io/NekoBoxPlusPlus/nb4a-plugin/)下载插件以获得完整的代理支持.
 
-Please visit [here](https://matsuridayo.github.io/nb4a-plugin/) to download plugins for full proxy
+Please visit [here](https://onlyno999.github.io/NekoBoxPlusPlus/nb4a-plugin/) to download plugins for full proxy
 supports.
 
 ## 支持的订阅格式 / Supported Subscription Format

@@ -225,7 +225,7 @@ object GroupBalancer {
             // to the best recorded standby of the armed pool
             // instead of leaving the line aimed at a ghost.
             Log.i(TAG, "watchdog: selected profile is gone; failing over")
-            failOverFromRecord(armed.first, selectedId)
+            failOverFromRecord(armed.first, armed.second, selectedId)
             healthForSelected = -1L
             scope.launch { runSpeedRound() }
             return

@@ -131,14 +131,11 @@ class ServiceNotification(
         .setContentTitle(title)
         .setOnlyAlertOnce(true)
         .setContentIntent(SagerNet.configureIntent(service))
-        .setSmallIcon(R.drawable.ic_service_active)
-        // NekoBox++: the badge at the front of the card is the
-        // app artwork (small version), not the stock mascot.
-        .setLargeIcon(
-            android.graphics.BitmapFactory.decodeResource(
-                (service as Context).resources, R.drawable.ic_service_artwork
-            )
-        )
+        // NekoBox++: the front (left) icon of the card is the
+        // app artwork itself; the stock mascot is gone. (As a
+        // large icon it landed on the right side of the card,
+        // which is why it rides the small-icon slot instead.)
+        .setSmallIcon(R.drawable.ic_service_artwork)
         .setCategory(NotificationCompat.CATEGORY_SERVICE)
         .setPriority(if (visible) NotificationCompat.PRIORITY_LOW else NotificationCompat.PRIORITY_MIN)
 

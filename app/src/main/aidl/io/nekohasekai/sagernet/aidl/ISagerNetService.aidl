@@ -11,4 +11,6 @@ interface ISagerNetService {
 
   int urlTest();
   void resetTrafficStats();
+  long queryDialFailures(String tag);
+  void resetDialHealth(String tag);
 }

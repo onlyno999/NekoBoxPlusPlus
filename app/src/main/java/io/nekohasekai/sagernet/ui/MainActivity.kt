@@ -66,6 +66,9 @@ class MainActivity : ThemedActivity(),
         super.onCreate(savedInstanceState)
 
         // NekoBox++: resume the load-balancer loops if a country is armed.
+        // The watchdog reads the core's dial-health through the
+        // service, which only this activity's connection can reach.
+        GroupBalancer.serviceProvider = { connection.service }
         GroupBalancer.ensureLoop(this)
 
         binding = LayoutMainBinding.inflate(layoutInflater)

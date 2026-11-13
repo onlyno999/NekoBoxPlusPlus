@@ -143,6 +143,15 @@ class BaseService {
             runCatching { data?.proxy?.looper?.resetStats() }
         }
 
+        override fun queryDialFailures(tag: String): Long {
+            return runCatching { data?.proxy?.box?.queryDialFailures(tag) ?: 0L }
+                .getOrDefault(0L)
+        }
+
+        override fun resetDialHealth(tag: String) {
+            runCatching { data?.proxy?.box?.resetDialHealth(tag) }
+        }
+
         override fun urlTest(): Int {
             if (data?.proxy?.box == null) {
                 error("core not started")

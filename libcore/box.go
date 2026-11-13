@@ -208,6 +208,21 @@ func (b *BoxInstance) QueryStats(tag, direct string) int64 {
 	return b.v2api.QueryStats(fmt.Sprintf("outbound>>>%s>>>traffic>>>%s", tag, direct))
 }
 
+// QueryDialFailures returns the core's count of consecutive
+// failed dials for an outbound tag (the main line is "proxy"):
+// real routed traffic whose handshake never came back, reset by
+// the core on any successful dial. The balancer's watchdog reads
+// this instead of probing the node in use.
+func (b *BoxInstance) QueryDialFailures(tag string) int64 {
+	return adapter.DialConsecutiveFailures(tag)
+}
+
+// ResetDialHealth restarts an outbound tag's dial-failure count;
+// the balancer calls it when the member behind the line changes.
+func (b *BoxInstance) ResetDialHealth(tag string) {
+	adapter.ResetDialHealth(tag)
+}
+
 func (b *BoxInstance) SelectOutbound(tag string) bool {
 	if b.selector != nil {
 		return b.selector.SelectOutbound(tag)

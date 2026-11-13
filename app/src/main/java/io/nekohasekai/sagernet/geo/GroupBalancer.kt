@@ -3,6 +3,7 @@ package io.nekohasekai.sagernet.geo
 import android.content.Context
 import android.util.Log
 import io.nekohasekai.sagernet.SagerNet
+import io.nekohasekai.sagernet.aidl.ISagerNetService
 import io.nekohasekai.sagernet.bg.proto.GeoTest
 import io.nekohasekai.sagernet.bg.proto.UrlTest
 import io.nekohasekai.sagernet.database.DataStore
@@ -14,6 +15,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -26,14 +29,19 @@ import java.util.concurrent.atomic.AtomicBoolean
  * Load balancing for NekoBox++ (front page). Rule since 1.2.1:
  * exactly ONE (group, country) pool can be lit ("自动中") across
  * the whole front page — lighting another one replaces it — and
- * the lit pool IS the general line: arming it steers the main
- * connection into the pool right away, its speed rounds (every
- * 10 minutes, region sweeps of its group every 30) keep the main
- * connection on the pool's fastest member, and a 30-second
- * watchdog fails over into the pool when the node in use dies
- * twice in a row. Route-rule load balancing is separate: those
- * pools live in the generated config as urltest outbounds and
- * never touch this state.
+ * the lit pool IS the general line. Since 1.2.12 the upkeep is
+ * the owner's standby model: rounds every 5 minutes test a
+ * rotating batch of FIVE pool members and only refresh their
+ * records (a healthy line is never displaced for speed), and
+ * death is judged by the core itself — the sing-box fork counts
+ * consecutive failed dials of real traffic on the main line,
+ * the watchdog reads that number every 10 seconds through the
+ * service, and at 3 in a row the line is swapped at once to the
+ * best recorded standby. Arming a pool steers the main
+ * connection into it from records; region sweeps of the lit
+ * group run every 30 minutes. Route-rule load balancing is
+ * separate: those pools live in the generated config as urltest
+ * outbounds and never touch this state.
  */
 object GroupBalancer {
 
@@ -46,7 +54,13 @@ object GroupBalancer {
     private const val KEY_GROUP = "lb_group"
     private const val SPEED_INTERVAL_MS = 5 * 60_000L
     private const val REGION_INTERVAL_MS = 30 * 60_000L
-    private const val WATCHDOG_MS = 30_000L
+    private const val WATCHDOG_MS = 10_000L
+    private const val BATCH_SIZE = 5
+    private const val DEATH_THRESHOLD = 3L
+
+    /** Tag of the general line in the generated config
+     *  (ConfigBuilder.TAG_PROXY). */
+    private const val MAIN_LINE_TAG = "proxy"
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val roundRunning = AtomicBoolean(false)
@@ -64,8 +78,19 @@ object GroupBalancer {
     @Volatile
     private var watchdogJob: Job? = null
 
+    /**
+     * How the watchdog reaches the running service (its core
+     * holds the dial-health counters). Set by MainActivity; null
+     * whenever no activity is bound, in which case the watchdog
+     * simply skips — reading a number is all it ever does.
+     */
     @Volatile
-    private var watchdogFails = 0
+    var serviceProvider: (() -> ISagerNetService?)? = null
+
+    /** Selection the core's dial-health counter currently
+     *  belongs to; a change restarts the count. */
+    @Volatile
+    private var healthForSelected: Long = -1L
 
     private fun keyOf(groupId: Long, countryCode: String) =
         "$groupId|${countryCode.uppercase()}"
@@ -123,6 +148,7 @@ object GroupBalancer {
             ensureLoop(context)
             scope.launch {
                 runRegionSweep()
+                steerIntoPool(pair.first, pair.second)
                 runSpeedRoundFor(pair.first, pair.second)
             }
         } else {
@@ -137,7 +163,7 @@ object GroupBalancer {
         speedJob?.cancel(); speedJob = null
         regionJob?.cancel(); regionJob = null
         watchdogJob?.cancel(); watchdogJob = null
-        watchdogFails = 0
+        healthForSelected = -1L
     }
 
     /** Start the periodic loops if a pool is lit. */
@@ -174,32 +200,65 @@ object GroupBalancer {
     }
 
     /**
-     * Watchdog: every 30 s, touch the speed-test address through the
-     * node currently in use (one light test, nothing else). Two
-     * failures in a row mean it died mid-session: immediately race
-     * the active country again and switch to its fastest survivor.
+     * Watchdog, standby model: no probing at all. The core counts
+     * consecutive failed dials of REAL traffic on the main line
+     * (a handshake that never came back); this tick only reads
+     * that number through the service, every 10 seconds. At
+     * [DEATH_THRESHOLD] in a row the node in use is dead: swap at
+     * once to the best recorded standby of the lit pool. A change
+     * of selection restarts the count, so every member is judged
+     * on its own dials only. No traffic means no signal and no
+     * verdict — an idle line is left alone.
      */
     private suspend fun watchdogTick() {
         if (!DataStore.serviceState.connected) return
         val armed = armedPair(app) ?: return
-        if (roundRunning.get()) return
-        val selected = withContext(Dispatchers.IO) {
-            SagerDatabase.proxyDao.getById(DataStore.selectedProxy)
+        val service = serviceProvider?.invoke() ?: return
+        val selectedId = DataStore.selectedProxy
+        if (healthForSelected != selectedId) {
+            healthForSelected = selectedId
+            runCatching { service.resetDialHealth(MAIN_LINE_TAG) }
+            return
+        }
+        val failures = runCatching {
+            service.queryDialFailures(MAIN_LINE_TAG)
+        }.getOrDefault(0L)
+        if (failures >= DEATH_THRESHOLD) {
+            Log.i(TAG, "watchdog: line dead ($failures consecutive failed dials)")
+            // The lit pool is the general line, so it takes over
+            // no matter where the dead node lived.
+            failOverFromRecord(armed.first, armed.second, selectedId)
+            healthForSelected = -1L
+            scope.launch { runSpeedRoundFor(armed.first, armed.second) }
+        }
+    }
+
+    /**
+     * Arm-time steering, from records only: when the current
+     * selection sits outside the pool, move it onto the pool's
+     * best known member. A selection already inside the pool is
+     * left alone — standby rounds never displace a working line.
+     */
+    private suspend fun steerIntoPool(groupId: Long, cc: String) {
+        val inside = withContext(Dispatchers.IO) {
+            SagerDatabase.proxyDao.getByGroup(groupId)
+        }.any {
+            it.id == DataStore.selectedProxy &&
+                runCatching {
+                    GeoStore.countryFor(app, it.requireBean())
+                }.getOrNull() == cc
+        }
+        if (inside) return
+        val best = withContext(Dispatchers.IO) {
+            bestKnown(app, groupId, cc)
         } ?: return
-        if (testPing(selected)) {
-            watchdogFails = 0
-        } else {
-            watchdogFails++
-            Log.i(TAG, "watchdog: in-use node failed ($watchdogFails)")
-            if (watchdogFails >= 2) {
-                watchdogFails = 0
-                // Swap FIRST, from the recorded results, like a native
-                // urltest group does. The lit pool is the general
-                // line, so it takes over no matter where the dead
-                // node lived.
-                failOverFromRecord(armed.first, armed.second, selected.id)
-                scope.launch { runSpeedRoundFor(armed.first, armed.second) }
-            }
+        val previous = DataStore.selectedProxy
+        DataStore.selectedProxy = best.id
+        ProfileManager.postUpdate(previous)
+        ProfileManager.postUpdate(best.id)
+        Log.i(TAG, "arm steer -> ${best.requireBean().displayName()} (${best.ping}ms)")
+        if (DataStore.serviceState.canStop) {
+            SagerNet.reloadService()
         }
     }
 
@@ -233,7 +292,7 @@ object GroupBalancer {
     }
 
 
-    /** A full pass: whole-group region sweep, then the speed race. */
+    /** A full pass: whole-group region sweep, then a standby batch. */
     suspend fun runRound() {
         runRegionSweep()
         runSpeedRound()
@@ -289,10 +348,12 @@ object GroupBalancer {
     }
 
     /**
-     * Speed-test one pool's members and refresh the records. When
-     * the pool is the lit one (the general line), the round steers
-     * the main connection to the pool's fastest member; rounds for
-     * any other pool only refresh records.
+     * Standby round: test the next [BATCH_SIZE] members of the
+     * pool, rotating through it round by round, and refresh
+     * their records. The results only stock the standby shelf —
+     * this round NEVER moves the main connection: a healthy line
+     * keeps its node until the core's dial health condemns it.
+     * A pool of five or fewer is covered whole in one round.
      */
     suspend fun runSpeedRoundFor(groupId: Long, cc: String) {
         if (!roundRunning.compareAndSet(false, true)) return
@@ -303,61 +364,30 @@ object GroupBalancer {
                 SagerDatabase.proxyDao.getByGroup(groupId)
             }
             val members = all.filter {
-                GeoStore.countryFor(app, it.requireBean()) == cc
-            }
+                runCatching {
+                    GeoStore.countryFor(app, it.requireBean())
+                }.getOrNull() == cc
+            }.sortedBy { it.id }
             if (members.isEmpty()) {
-                Log.i(TAG, "round for $cc: no members")
+                Log.i(TAG, "standby round for $cc: no members")
                 return
             }
-            Log.i(TAG, "round for $cc over ${members.size} profiles")
-
-            val queue = ConcurrentLinkedQueue(members)
-            val eligible = ConcurrentLinkedQueue<ProxyEntity>()
-            val workers = mutableListOf<Job>()
-            val concurrent = DataStore.connectionTestConcurrent.coerceIn(1, 16)
-            repeat(concurrent) {
-                workers.add(scope.launch {
-                    while (true) {
-                        val profile = queue.poll() ?: break
-                        if (testPing(profile)) {
-                            eligible.add(profile)
-                        }
-                    }
-                })
+            val prefs = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            val cursorKey = "rot|" + keyOf(groupId, cc)
+            val lastId = prefs.getLong(cursorKey, -1L)
+            val startIdx = members.indexOfFirst { it.id > lastId }
+                .let { if (it < 0) 0 else it }
+            val batch = (0 until minOf(BATCH_SIZE, members.size))
+                .map { members[(startIdx + it) % members.size] }
+            Log.i(TAG, "standby batch for $cc: ${batch.size} of ${members.size} profiles")
+            withContext(Dispatchers.IO) {
+                batch.map { profile ->
+                    async { runCatching { testPing(profile) } }
+                }.awaitAll()
             }
-            workers.forEach { it.join() }
-
-            // Switch right after testing, to the fastest known:
-            // this round's winner, or a recorded available best if
-            // it is faster (a flaky parallel pass must not bury a
-            // node that measured well minutes ago).
-            val tested = eligible.minByOrNull { it.ping }
-            val recorded = bestKnown(app, groupId, cc)?.takeIf { it.ping > 0 }
-            val best = listOfNotNull(tested, recorded).minByOrNull { it.ping }
-            if (best == null) {
-                Log.i(TAG, "round for $cc: nothing reachable")
-                return
-            }
-            // The lit pool is the general line: its rounds always
-            // steer the main connection into the pool, wherever the
-            // current selection happens to sit.
-            val steering = armedPair(app) == (groupId to cc)
-            if (DataStore.selectedProxy == best.id) {
-                Log.i(TAG, "round for $cc: staying on ${best.requireBean().displayName()} (${best.ping}ms)")
-            } else if (steering) {
-                val previous = DataStore.selectedProxy
-                DataStore.selectedProxy = best.id
-                ProfileManager.postUpdate(previous)
-                ProfileManager.postUpdate(best.id)
-                Log.i(TAG, "auto-connect -> ${best.requireBean().displayName()} (${best.ping}ms)")
-                if (DataStore.serviceState.canStop) {
-                    SagerNet.reloadService()
-                }
-            } else {
-                Log.i(TAG, "round for $cc: records refreshed (not riding this pool)")
-            }
+            prefs.edit().putLong(cursorKey, batch.last().id).apply()
         } catch (e: Exception) {
-            Log.w(TAG, "round failed", e)
+            Log.w(TAG, "standby round failed", e)
         } finally {
             roundRunning.set(false)
             doneSignal.complete(Unit)
@@ -365,12 +395,10 @@ object GroupBalancer {
     }
 
     /**
-     * Connect-time pick: do NOT wait for a fresh round. The round
-     * that started when the user switched the country to auto has
-     * already measured everyone, so connect immediately to the
-     * best known node of the active country, then let a background
-     * round refresh regions and speeds (it switches over if it
-     * finds something better).
+     * Connect-time pick: do NOT wait for a fresh round. Connect
+     * immediately to the best known node of the lit pool from the
+     * recorded results, then let a background standby round keep
+     * the records fresh.
      */
     suspend fun pickForConnect() {
         // The lit pool is the general line: connect starts on its

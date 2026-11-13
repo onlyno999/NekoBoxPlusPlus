@@ -648,49 +648,6 @@ fun buildConfig(
             }
         }
 
-        // Built-in split rules, on by default: Play Store
-        // domains ride the main line first, then mainland
-        // domains and IPs go direct. The sets are fetched
-        // through the main line at connect time and
-        // refreshed daily.
-        if (!forTest) {
-            route.rule_set.add(RuleSet().apply {
-                type = "remote"
-                tag = "geosite-cn"
-                format = "binary"
-                url = "https://raw.githubusercontent.com/onlyno999/sing-rules-filtered/main/rule-set/geosite-cn.srs"
-                download_detour = TAG_PROXY
-                update_interval = "24h"
-            })
-            route.rule_set.add(RuleSet().apply {
-                type = "remote"
-                tag = "geoip-cn"
-                format = "binary"
-                url = "https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/geoip-cn.srs"
-                download_detour = TAG_PROXY
-                update_interval = "24h"
-            })
-            route.rules.add(Rule_DefaultOptions().apply {
-                domain_suffix = mutableListOf(
-                    "googleapis.com",
-                    "connectivitycheck.gstatic.com",
-                    "www.google.com",
-                    "play-fe.googleapis.com",
-                    "play-lh.googleusercontent.com",
-                    "playstoregatewayadapter-pa.googleapis.com",
-                    "services.googleapis.cn",
-                    "xn--ngstr-lra8j.com",
-                    "play.googleapis.com",
-                    "mtalk.google.com"
-                )
-                outbound = TAG_PROXY
-            })
-            route.rules.add(Rule_DefaultOptions().apply {
-                rule_set = mutableListOf("geosite-cn", "geoip-cn")
-                outbound = TAG_DIRECT
-            })
-        }
-
         // 对 rule_set tag 去重
         if (route.rule_set != null) {
             route.rule_set = route.rule_set.distinctBy { it.tag }

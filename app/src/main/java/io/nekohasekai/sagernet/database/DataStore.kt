@@ -252,6 +252,7 @@ object DataStore : OnPreferenceDataStoreChangeListener {
     var subscriptionAutoUpdateDelay by profileCacheStore.stringToInt(Key.SUBSCRIPTION_AUTO_UPDATE_DELAY) { 360 }
 
     var rulesFirstCreate by profileCacheStore.boolean("rulesFirstCreate")
+    var nbppCnRulesV2 by profileCacheStore.boolean("nbppCnRulesV2")
 
     override fun onPreferenceDataStoreChanged(store: PreferenceDataStore, key: String) {
     }

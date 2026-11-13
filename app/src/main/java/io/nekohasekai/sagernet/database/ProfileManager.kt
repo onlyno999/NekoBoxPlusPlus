@@ -181,7 +181,53 @@ object ProfileManager {
         }
     }
 
+    // Play Store domains that must ride the main line ahead
+    // of the China bypass rules, or downloads stall at 99%.
+    const val PLAY_STORE_DOMAINS =
+        "googleapis.com,connectivitycheck.gstatic.com,www.google.com," +
+        "play-fe.googleapis.com,play-lh.googleusercontent.com," +
+        "playstoregatewayadapter-pa.googleapis.com,services.googleapis.cn," +
+        "xn--ngstr-lra8j.com,play.googleapis.com,mtalk.google.com"
+
     suspend fun getRules(): List<RuleEntity> {
+        // One-time upgrade of the upstream-seeded China trio on
+        // existing installs: full Play Store domain list, all
+        // three enabled, store rule ahead of the bypass rules.
+        if (DataStore.rulesFirstCreate && !DataStore.nbppCnRulesV2) {
+            DataStore.nbppCnRulesV2 = true
+            val existing = SagerDatabase.rulesDao.allRules()
+            val play = existing.firstOrNull { it.domains.contains("googleapis") && it.outbound == 0L }
+            val dom = existing.firstOrNull { it.domains == "geosite:cn" && it.outbound == -1L }
+            val ip = existing.firstOrNull { it.ip == "geoip:cn" && it.outbound == -1L }
+            val already = play != null && play.domains.contains("play-fe.googleapis.com") &&
+                play.enabled && dom?.enabled == true && ip?.enabled == true
+            if (!already && existing.isNotEmpty()) {
+                listOfNotNull(play, dom, ip).forEach { deleteRule(it.id) }
+                createRule(
+                    RuleEntity(
+                        name = app.getString(R.string.route_play_store, "中国"),
+                        domains = PLAY_STORE_DOMAINS,
+                        enabled = true
+                    ), false
+                )
+                createRule(
+                    RuleEntity(
+                        name = app.getString(R.string.route_bypass_domain, "中国"),
+                        domains = "geosite:cn",
+                        outbound = -1,
+                        enabled = true
+                    ), false
+                )
+                createRule(
+                    RuleEntity(
+                        name = app.getString(R.string.route_bypass_ip, "中国"),
+                        ip = "geoip:cn",
+                        outbound = -1,
+                        enabled = true
+                    ), false
+                )
+            }
+        }
         var rules = SagerDatabase.rulesDao.allRules()
         if (rules.isEmpty() && !DataStore.rulesFirstCreate) {
             DataStore.rulesFirstCreate = true
@@ -213,21 +259,24 @@ object ProfileManager {
                 if (country == "cn") createRule(
                     RuleEntity(
                         name = app.getString(R.string.route_play_store, displayCountry),
-                        domains = "googleapis.cn",
+                        domains = PLAY_STORE_DOMAINS,
+                        enabled = true
                     ), false
                 )
                 createRule(
                     RuleEntity(
                         name = app.getString(R.string.route_bypass_domain, displayCountry),
                         domains = "geosite:$country",
-                        outbound = -1
+                        outbound = -1,
+                        enabled = true
                     ), false
                 )
                 createRule(
                     RuleEntity(
                         name = app.getString(R.string.route_bypass_ip, displayCountry),
                         ip = "geoip:$country",
-                        outbound = -1
+                        outbound = -1,
+                        enabled = true
                     ), false
                 )
             }

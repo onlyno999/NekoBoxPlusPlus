@@ -176,9 +176,13 @@ class BackupFragment : NamedFragment(R.layout.layout_backup) {
             }
             val user = binding.webdavUser.text.toString()
             val pass = binding.webdavPass.text.toString()
-            val date = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US)
-                .format(Date())
-            val fileName = "nekoboxpp_backup_$date.json"
+            // Every upload is its own file, stamped to the
+            // second: backing up again never overwrites an
+            // earlier backup from the same day.
+            val stamp = java.text.SimpleDateFormat(
+                "yyyy-MM-dd_HHmmss", java.util.Locale.US
+            ).format(Date())
+            val fileName = "nekoboxpp_backup_$stamp.json"
             runOnDefaultDispatcher {
                 try {
                     val data = doBackup(

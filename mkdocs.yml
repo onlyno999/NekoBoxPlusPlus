@@ -26,6 +26,7 @@ theme:
     - content.code.copy
 nav:
   - 首页: index.md
+  - 推广: promo.md
   - 下载: download.md
   - 使用文档: guide.md
   - 插件: nb4a-plugin.md

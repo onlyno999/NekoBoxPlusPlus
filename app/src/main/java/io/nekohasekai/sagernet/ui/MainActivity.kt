@@ -367,7 +367,7 @@ class MainActivity : ThemedActivity(),
 
             R.id.nav_about -> displayFragment(AboutFragment())
             R.id.nav_tuiguang -> {
-                launchCustomTab("https://neko-box.pages.dev/喵")
+                launchCustomTab("https://onlyno999.github.io/NekoBoxPlusPlus/promo/")
                 return false
             }
 

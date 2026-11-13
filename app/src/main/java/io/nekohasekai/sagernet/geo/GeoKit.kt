@@ -100,6 +100,22 @@ object GeoStore {
         }
     }
 
+    /**
+     * Drop this process's in-memory copy of the maps. The config
+     * builder runs in the service process, whose copy loads once
+     * and would otherwise stay frozen at whatever the shared file
+     * held when that process first touched it: an LB pool whose
+     * members' countries were probed later (in the UI process)
+     * then resolves to zero members at config-build time and its
+     * rules silently fall back to the main line.
+     */
+    fun invalidateCache() {
+        synchronized(lock) {
+            cache = null
+            tryCache = null
+        }
+    }
+
     fun keyOf(bean: AbstractBean): String =
         "${bean.javaClass.name}|${bean.serverAddress}|${bean.serverPort}"
 

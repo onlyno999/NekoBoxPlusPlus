@@ -124,6 +124,10 @@ fun buildConfig(
     }
 
     val extraRules = if (forTest) listOf() else SagerDatabase.rulesDao.enabledRules()
+    // This builder runs in the service process: drop its frozen
+    // GeoStore snapshot so LB pool membership resolves from the
+    // country data as it stands now, not as of process start.
+    if (!forTest) io.nekohasekai.sagernet.geo.GeoStore.invalidateCache()
     val extraProxies =
         if (forTest) mapOf() else SagerDatabase.proxyDao.getEntities(extraRules.flatMap { rule ->
             when {
@@ -493,6 +497,13 @@ fun buildConfig(
             for (ref in lbRefs) {
                 val memberTags = io.nekohasekai.sagernet.geo.LbRef.memberIds(ref)
                     .mapNotNull { tagMap[it] }
+                if (memberTags.isEmpty()) {
+                    android.util.Log.w(
+                        "NBPP",
+                        "LB pool " + io.nekohasekai.sagernet.geo.LbRef.tagFor(ref) +
+                            ": no members with a known country; its rules fall back to the main line"
+                    )
+                }
                 if (memberTags.isNotEmpty()) {
                     lbTags.add(io.nekohasekai.sagernet.geo.LbRef.tagFor(ref))
                     outbounds.add(Outbound_URLTestOptions().apply {

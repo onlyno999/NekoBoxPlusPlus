@@ -1935,17 +1935,12 @@ class ConfigurationFragment @JvmOverloads constructor(
                     }
                 } else {
                     view.setOnClickListener {
-                        // Members of an armed section (auto, including
-                        // the locked general line) are managed by the
-                        // balancer: manual selection stays blocked
-                        // until that section's auto is turned off.
-                        val nodeCc = GeoStore.countryFor(
-                            view.context, proxyEntity.requireBean()
-                        )
-                        if (nodeCc != null && GroupBalancer.isArmed(
-                                view.context, proxyGroup.id, nodeCc
-                            )
-                        ) {
+                        // While ANY pool is armed (自动中), the
+                        // balancer owns the main connection app-wide:
+                        // manual selection is blocked in every group
+                        // and every section, not just inside the armed
+                        // pool itself. Turn the pool's auto off first.
+                        if (GroupBalancer.armedPair(view.context) != null) {
                             Toast.makeText(
                                 view.context,
                                 "自动中：先关掉自动才能手动选节点",

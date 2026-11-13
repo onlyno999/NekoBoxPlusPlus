@@ -1878,7 +1878,7 @@ class ConfigurationFragment @JvmOverloads constructor(
                 lbText.visibility = View.VISIBLE
                 val active = GroupBalancer
                     .isArmed(view.context, proxyGroup.id, header.key)
-                lbText.text = if (active) "自动中" else "自动"
+                lbText.text = if (active) "自动模式" else "自动"
                 lbText.setTextColor(
                     if (active) 0xFF2E9E4F.toInt() else 0xFF777777.toInt()
                 )
@@ -1943,7 +1943,7 @@ class ConfigurationFragment @JvmOverloads constructor(
                         if (GroupBalancer.armedPair(view.context) != null) {
                             Toast.makeText(
                                 view.context,
-                                "自动中：先关掉自动才能手动选节点",
+                                "自动模式：先关掉自动模式才能手动选节点",
                                 Toast.LENGTH_SHORT
                             ).show()
                             return@setOnClickListener

@@ -517,6 +517,27 @@ fun buildConfig(
             }
         }
 
+        // Pin Google services to the main line before any user
+        // rule can claim them for a CN/bypass path: CN geosite
+        // and geoip data includes Google addresses, which breaks
+        // Play Store downloads (they stall near completion when
+        // the transfer lands on the direct path). The rule set
+        // is fetched through the main line and refreshed daily.
+        if (!forTest) {
+            route.rule_set.add(RuleSet().apply {
+                type = "remote"
+                tag = "geosite-google"
+                format = "binary"
+                url = "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-google.srs"
+                download_detour = TAG_PROXY
+                update_interval = "24h"
+            })
+            route.rules.add(Rule_DefaultOptions().apply {
+                rule_set = mutableListOf("geosite-google")
+                outbound = TAG_PROXY
+            })
+        }
+
         // apply user rules
         for (rule in extraRules) {
             if (rule.packages.isNotEmpty()) {

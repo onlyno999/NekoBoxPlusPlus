@@ -1088,12 +1088,6 @@ public class SingBoxOptions {
 
         public String url;
 
-        @SerializedName("download_detour")
-        public String download_detour;
-
-        @SerializedName("update_interval")
-        public String update_interval;
-
     }
 
     public static class DefaultRule extends SingBoxOption {

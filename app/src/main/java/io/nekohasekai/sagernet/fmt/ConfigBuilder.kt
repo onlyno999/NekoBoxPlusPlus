@@ -517,45 +517,6 @@ fun buildConfig(
             }
         }
 
-        // Pin Google services to the main line before any user
-        // rule can claim them for a CN/bypass path: CN geosite
-        // and geoip data includes Google addresses, which breaks
-        // Play Store downloads (they stall near completion when
-        // the transfer lands on the direct path). The rule set
-        // is fetched through the main line and refreshed daily.
-        if (!forTest) {
-            route.rule_set.add(RuleSet().apply {
-                type = "remote"
-                tag = "geosite-google"
-                format = "binary"
-                url = "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-google.srs"
-                download_detour = TAG_PROXY
-                update_interval = "24h"
-            })
-            route.rules.add(Rule_DefaultOptions().apply {
-                rule_set = mutableListOf("geosite-google")
-                outbound = TAG_PROXY
-            })
-            // Play Store and Google services traffic is pinned
-            // by app uid as well, ahead of every user rule: Play
-            // payload downloads often arrive as bare IPs that CN
-            // IP data claims, stalling them near completion, and
-            // no domain-level setting can catch those. Matching
-            // by app makes downloads immune to address rules.
-            PackageCache.awaitLoadSync()
-            val playUids = listOf(
-                "com.android.vending",
-                "com.google.android.gms",
-                "com.google.android.gsf",
-            ).mapNotNull { PackageCache[it]?.takeIf { uid -> uid >= 1000 } }
-            if (playUids.isNotEmpty()) {
-                route.rules.add(Rule_DefaultOptions().apply {
-                    user_id = playUids
-                    outbound = TAG_PROXY
-                })
-            }
-        }
-
         // apply user rules
         for (rule in extraRules) {
             if (rule.packages.isNotEmpty()) {

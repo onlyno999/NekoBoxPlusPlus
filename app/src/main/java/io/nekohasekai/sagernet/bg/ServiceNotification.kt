@@ -47,6 +47,19 @@ class ServiceNotification(
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0
 
         fun genTitle(ent: ProxyEntity): String {
+            // NekoBox++: the measured region goes in front,
+            // then the node name ("US node" reads
+            // "🇺🇸 美国 <name>"). Falls back to the group format
+            // when the region is unknown.
+            val cc = runCatching {
+                val ctx = SagerNet.application
+                io.nekohasekai.sagernet.geo.GeoStore.invalidateCache()
+                io.nekohasekai.sagernet.geo.GeoStore.countryFor(ctx, ent.requireBean())
+            }.getOrNull()
+            if (!cc.isNullOrBlank()) {
+                return io.nekohasekai.sagernet.geo.GeoStore.countryTitle(cc) +
+                    " " + ent.displayName()
+            }
             val gn = if (DataStore.showGroupInNotification)
                 SagerDatabase.groupDao.getById(ent.groupId)?.displayName() else null
             return if (gn == null) ent.displayName() else "[$gn] ${ent.displayName()}"
@@ -119,6 +132,13 @@ class ServiceNotification(
         .setOnlyAlertOnce(true)
         .setContentIntent(SagerNet.configureIntent(service))
         .setSmallIcon(R.drawable.ic_service_active)
+        // NekoBox++: the badge at the front of the card is the
+        // app artwork (small version), not the stock mascot.
+        .setLargeIcon(
+            android.graphics.BitmapFactory.decodeResource(
+                (service as Context).resources, R.drawable.ic_service_artwork
+            )
+        )
         .setCategory(NotificationCompat.CATEGORY_SERVICE)
         .setPriority(if (visible) NotificationCompat.PRIORITY_LOW else NotificationCompat.PRIORITY_MIN)
 

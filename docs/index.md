@@ -22,3 +22,12 @@
 - [下载最新版](download.md)
 - [GitHub 仓库](https://github.com/onlyno999/NekoBoxPlusPlus)
 - [Telegram 更新频道](https://t.me/nekbox999)
+
+## 捐款
+
+猫猫很可爱 请给猫猫钱
+
+- **USDT（TRC20）**：`TNZYEoTHuriimnJSjBY6mreraMcrgSzNKw`
+- **XMR（门罗币）**：`5iDCcJrCqeqfHWhjgr8u7jUUvrqMr4srRHHDUeViTmC9`
+
+感谢每一位喂猫的朋友。

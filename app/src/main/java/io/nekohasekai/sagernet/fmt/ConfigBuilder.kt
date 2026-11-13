@@ -536,6 +536,24 @@ fun buildConfig(
                 rule_set = mutableListOf("geosite-google")
                 outbound = TAG_PROXY
             })
+            // Play Store and Google services traffic is pinned
+            // by app uid as well, ahead of every user rule: Play
+            // payload downloads often arrive as bare IPs that CN
+            // IP data claims, stalling them near completion, and
+            // no domain-level setting can catch those. Matching
+            // by app makes downloads immune to address rules.
+            PackageCache.awaitLoadSync()
+            val playUids = listOf(
+                "com.android.vending",
+                "com.google.android.gms",
+                "com.google.android.gsf",
+            ).mapNotNull { PackageCache[it]?.takeIf { uid -> uid >= 1000 } }
+            if (playUids.isNotEmpty()) {
+                route.rules.add(Rule_DefaultOptions().apply {
+                    user_id = playUids
+                    outbound = TAG_PROXY
+                })
+            }
         }
 
         // apply user rules

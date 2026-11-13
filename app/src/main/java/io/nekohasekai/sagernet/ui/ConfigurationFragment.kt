@@ -1723,12 +1723,8 @@ class ConfigurationFragment @JvmOverloads constructor(
                     // group, the running pool still lists the
                     // deleted profiles as members; reload so
                     // the pool drops them and re-picks a carrier.
-                    if (GroupBalancer.onPoolMembersDeleted(setOf(proxyGroup.id))) {
-                        configurationListView.post {
-                            (activity as? MainActivity)?.snackbar(
-                                "分流池节点已删除，已刷新连接，池子会自动改选"
-                            )?.show()
-                        }
+                    runCatching {
+                        GroupBalancer.onPoolMembersDeleted(setOf(proxyGroup.id))
                     }
                 }
             }

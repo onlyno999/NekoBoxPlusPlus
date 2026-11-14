@@ -32,3 +32,20 @@ googleapis.com,connectivitycheck.gstatic.com,www.google.com,play-fe.googleapis.c
 - 出口：代理（也可以绑一个节点池）
 
 加完重连一次，商店就能正常下载了。不加这条、又开着中国域名/中国 IP 规则的话，商店就是下不了。
+
+> 注：1.4.6 起这三条规则已经内置在 App 里、默认开启（路由页可见），不用再手动添加。
+
+## AI 服务分流规则
+
+想让 Gemini、ChatGPT、Claude 这些 AI 服务固定走代理（也可以绑一个指定地区的节点池，如美国池），自己加一条规则：
+
+- 类型：`domain`（域名）
+- 内容（整段复制粘贴）：
+
+```
+gemini.google.com,aistudio.google.com,ai.google.dev,notebooklm.google.com,deepmind.google,generativelanguage.googleapis.com,chatgpt.com,openai.com,oaistatic.com,oaiusercontent.com,sora.com,claude.ai,anthropic.com,claudeusercontent.com,perplexity.ai,x.ai,grok.com,poe.com,huggingface.co,copilot.microsoft.com
+```
+
+- 出口：代理（也可以绑一个节点池）
+
+这些域名按后缀匹配，子域名自动一起生效。加完重连一次即可。

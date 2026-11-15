@@ -166,8 +166,61 @@ object GroupBalancer {
         healthForSelected = -1L
     }
 
+    // ---- network-change region refresh ----
+
+    private const val NET_SWEEP_COOLDOWN_MS = 3 * 60_000L
+    private const val NET_SETTLE_MS = 3_000L
+
+    private val netWatchRegistered = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    @Volatile
+    private var lastNetwork: android.net.Network? = null
+
+    @Volatile
+    private var lastNetSweepAt = 0L
+
+    /**
+     * Whenever the default network changes (Wi-Fi to mobile
+     * data, a new Wi-Fi, a reconnect), run one region sweep
+     * of the lit pool's group in the background: exits move
+     * with the network, so the sections should be re-filed
+     * against the new one. Regions only — never a speed
+     * round. Registered once per process; the network
+     * present at registration is the baseline, so only
+     * genuine changes fire. A short cooldown keeps flapping
+     * networks from sweeping back to back.
+     */
+    fun watchNetwork(context: Context) {
+        if (!netWatchRegistered.compareAndSet(false, true)) return
+        val cm = context.applicationContext
+            .getSystemService(android.net.ConnectivityManager::class.java) ?: return
+        lastNetwork = runCatching { cm.activeNetwork }.getOrNull()
+        runCatching {
+            cm.registerDefaultNetworkCallback(
+                object : android.net.ConnectivityManager.NetworkCallback() {
+                    override fun onAvailable(network: android.net.Network) {
+                        if (network == lastNetwork) return
+                        lastNetwork = network
+                        val now = System.currentTimeMillis()
+                        if (now - lastNetSweepAt < NET_SWEEP_COOLDOWN_MS) return
+                        lastNetSweepAt = now
+                        scope.launch {
+                            delay(NET_SETTLE_MS)
+                            runRegionSweep()
+                        }
+                    }
+
+                    override fun onLost(network: android.net.Network) {
+                        if (network == lastNetwork) lastNetwork = null
+                    }
+                }
+            )
+        }.onFailure { Log.w(TAG, "network watch failed", it) }
+    }
+
     /** Start the periodic loops if a pool is lit. */
     fun ensureLoop(context: Context) {
+        watchNetwork(context)
         if (armedPair(context) == null) return
         if (speedJob?.isActive != true) {
             speedJob = scope.launch {

@@ -97,6 +97,7 @@ import io.nekohasekai.sagernet.ui.profile.WireGuardSettingsActivity
 import io.nekohasekai.sagernet.widget.QRCodeDialog
 import io.nekohasekai.sagernet.widget.UndoSnackbarManager
 import kotlinx.coroutines.DelicateCoroutinesApi
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.isActive
@@ -1394,7 +1395,7 @@ class ConfigurationFragment @JvmOverloads constructor(
             }
 
             var configurationIdList: MutableList<Long> = mutableListOf()
-            val configurationList = HashMap<Long, ProxyEntity>()
+            val configurationList = ConcurrentHashMap<Long, ProxyEntity>()
 
             // ---- NekoBox++: collapsible country sections ----
             var geoRows: List<GeoRow> = emptyList()
@@ -1824,23 +1825,75 @@ class ConfigurationFragment @JvmOverloads constructor(
                 reloadProfiles()
             }
 
+            private val profilesReloadLock = Any()
+
+            @Volatile
+            private var profilesReloadRunning = false
+
+            @Volatile
+            private var profilesReloadDirty = false
+
             fun reloadProfiles() {
-                filtering = false
-                var newProfiles = SagerDatabase.proxyDao.getByGroup(proxyGroup.id)
-                when (proxyGroup.order) {
-                    GroupOrder.BY_NAME -> {
-                        newProfiles = newProfiles.sortedBy { it.displayName() }
-
+                // A big subscription update fires this in bursts
+                // (listener callbacks, one per test batch). Running
+                // every burst at once flooded the main thread with
+                // full rebuilds - the freeze - and rebuilt the
+                // shared profile map off-thread while it was being
+                // bound - the crash that followed. Coalesce: one
+                // reload at a time, at most one queued re-run.
+                synchronized(profilesReloadLock) {
+                    if (profilesReloadRunning) {
+                        profilesReloadDirty = true
+                        return
                     }
-
-                    GroupOrder.BY_DELAY -> {
-                        newProfiles =
-                            newProfiles.sortedBy { if (it.status == 1) it.ping else 114514 }
+                    profilesReloadRunning = true
+                }
+                runOnDefaultDispatcher {
+                    try {
+                        do {
+                            synchronized(profilesReloadLock) { profilesReloadDirty = false }
+                            reloadProfilesOnce()
+                        } while (profilesReloadDirty)
+                    } finally {
+                        synchronized(profilesReloadLock) { profilesReloadRunning = false }
                     }
                 }
+            }
 
-                configurationList.clear()
-                configurationList.putAll(newProfiles.associateBy { it.id })
+            private suspend fun reloadProfilesOnce() {
+                filtering = false
+                // While an update holds the database this read can
+                // throw, or come back empty for a group that does
+                // have profiles; either used to leave the whole tab
+                // blank for the visit. Retry a few times.
+                var loaded: List<ProxyEntity>? = null
+                for (attempt in 0 until 5) {
+                    try {
+                        var fetched = SagerDatabase.proxyDao.getByGroup(proxyGroup.id)
+                        if (fetched.isEmpty() && attempt < 4 &&
+                            SagerDatabase.proxyDao.countByGroup(proxyGroup.id) > 0L
+                        ) {
+                            delay(300L)
+                            continue
+                        }
+                        when (proxyGroup.order) {
+                            GroupOrder.BY_NAME -> {
+                                fetched = fetched.sortedBy { it.displayName() }
+                            }
+
+                            GroupOrder.BY_DELAY -> {
+                                fetched =
+                                    fetched.sortedBy { if (it.status == 1) it.ping else 114514 }
+                            }
+                        }
+                        loaded = fetched
+                        break
+                    } catch (e: Exception) {
+                        Logs.w(e)
+                        if (attempt < 4) delay(300L)
+                    }
+                }
+                val newProfiles = loaded ?: return
                 val newProfileIds = newProfiles.map { it.id }
 
                 var selectedProfileIndex = -1
@@ -1851,6 +1904,11 @@ class ConfigurationFragment @JvmOverloads constructor(
                 }
 
                 configurationListView.post {
+                    // Swap the profile map here, on the main thread
+                    // and together with the id list, so binding
+                    // never reads a half-rebuilt map.
+                    configurationList.clear()
+                    configurationList.putAll(newProfiles.associateBy { it.id })
                     configurationIdList.clear()
                     configurationIdList.addAll(newProfileIds)
                     rebuildRows()

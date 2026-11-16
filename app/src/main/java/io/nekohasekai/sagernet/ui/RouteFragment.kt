@@ -20,6 +20,7 @@ import io.nekohasekai.sagernet.databinding.LayoutRouteItemBinding
 import io.nekohasekai.sagernet.ktx.*
 import io.nekohasekai.sagernet.widget.ListListener
 import io.nekohasekai.sagernet.widget.UndoSnackbarManager
+import kotlinx.coroutines.delay
 
 class RouteFragment : ToolbarFragment(R.layout.layout_route), Toolbar.OnMenuItemClickListener {
 
@@ -93,6 +94,19 @@ class RouteFragment : ToolbarFragment(R.layout.layout_route), Toolbar.OnMenuItem
         }).attachToRecyclerView(ruleListView)
     }
 
+    override fun onResume() {
+        super.onResume()
+
+        // An empty rule list here means the initial load never
+        // landed (see reload()); ask again instead of showing
+        // only the document card.
+        if (::ruleAdapter.isInitialized && ruleAdapter.ruleList.isEmpty()) {
+            runOnDefaultDispatcher {
+                ruleAdapter.reload()
+            }
+        }
+    }
+
     override fun onDestroy() {
         if (::ruleAdapter.isInitialized) {
             ProfileManager.removeListener(ruleAdapter)
@@ -129,7 +143,21 @@ class RouteFragment : ToolbarFragment(R.layout.layout_route), Toolbar.OnMenuItem
 
         val ruleList = ArrayList<RuleEntity>()
         suspend fun reload() {
-            val rules = ProfileManager.getRules()
+            // Same failure as the group page: getRules() can block
+            // or throw while an update holds the database, and the
+            // lost one-shot load left only the document card on
+            // screen. Retry before giving up.
+            var loaded: List<RuleEntity>? = null
+            for (attempt in 0 until 5) {
+                try {
+                    loaded = ProfileManager.getRules()
+                    break
+                } catch (e: Exception) {
+                    Logs.w(e)
+                    delay(400L)
+                }
+            }
+            val rules = loaded ?: return
             ruleListView.post {
                 ruleList.clear()
                 ruleList.addAll(rules)

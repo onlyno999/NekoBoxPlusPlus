@@ -165,11 +165,31 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
         val groupList = ArrayList<ProxyGroup>()
 
         suspend fun reload() {
-            val groups = SagerDatabase.groupDao.allGroups().toMutableList()
-            if (groups.size > 1 && SagerDatabase.proxyDao.countByGroup(groups.find { it.ungrouped }!!.id) == 0L) groups.removeAll { it.ungrouped }
-            groupList.clear()
-            groupList.addAll(groups)
+            // A subscription update that lands dozens of profiles
+            // can hold the database for seconds; a single failed
+            // read used to kill this one-shot load silently and
+            // leave the page blank for the whole visit. Retry a
+            // few times, and only touch the list on the main
+            // thread once a read has actually succeeded.
+            var loaded: MutableList<ProxyGroup>? = null
+            for (attempt in 0 until 5) {
+                try {
+                    val fetched = SagerDatabase.groupDao.allGroups().toMutableList()
+                    val ungroupedId = fetched.find { it.ungrouped }?.id
+                    if (fetched.size > 1 && ungroupedId != null &&
+                        SagerDatabase.proxyDao.countByGroup(ungroupedId) == 0L
+                    ) fetched.removeAll { it.ungrouped }
+                    loaded = fetched
+                    break
+                } catch (e: Exception) {
+                    Logs.w(e)
+                    delay(400L)
+                }
+            }
+            val groups = loaded ?: return
             groupListView.post {
+                groupList.clear()
+                groupList.addAll(groups)
                 notifyDataSetChanged()
             }
         }
@@ -300,6 +320,19 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
             }
         }
 
+    }
+
+    override fun onResume() {
+        super.onResume()
+
+        // Same heal as the configuration page: an empty list here
+        // means the initial load never landed, so ask again
+        // instead of sitting on a blank page.
+        if (::groupAdapter.isInitialized && groupAdapter.groupList.isEmpty()) {
+            runOnDefaultDispatcher {
+                groupAdapter.reload()
+            }
+        }
     }
 
     override fun onDestroy() {

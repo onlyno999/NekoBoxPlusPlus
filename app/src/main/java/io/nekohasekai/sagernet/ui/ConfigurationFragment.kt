@@ -1005,21 +1005,38 @@ class ConfigurationFragment @JvmOverloads constructor(
             }
 
             runOnDefaultDispatcher {
-                var newGroupList = ArrayList(SagerDatabase.groupDao.allGroups())
-                if (newGroupList.isEmpty()) {
-                    SagerDatabase.groupDao.createGroup(ProxyGroup(ungrouped = true))
-                    newGroupList = ArrayList(SagerDatabase.groupDao.allGroups())
-                }
-                newGroupList.find { it.ungrouped }?.let {
-                    if (SagerDatabase.proxyDao.countByGroup(it.id) == 0L) {
-                        newGroupList.remove(it)
+                // Same one-shot fragility as the inner pages, one
+                // level up: if this read died while the database
+                // was busy, the pager got no groups at all and
+                // every page built on it - the profile picker
+                // included - stayed blank for good. Retry while
+                // the database is busy.
+                var newGroupList: ArrayList<ProxyGroup>? = null
+                for (attempt in 0 until 6) {
+                    try {
+                        val fetched = ArrayList(SagerDatabase.groupDao.allGroups())
+                        if (fetched.isEmpty()) {
+                            SagerDatabase.groupDao.createGroup(ProxyGroup(ungrouped = true))
+                            fetched.addAll(SagerDatabase.groupDao.allGroups())
+                        }
+                        fetched.find { it.ungrouped }?.let {
+                            if (SagerDatabase.proxyDao.countByGroup(it.id) == 0L) {
+                                fetched.remove(it)
+                            }
+                        }
+                        newGroupList = fetched
+                        break
+                    } catch (e: Exception) {
+                        Logs.w(e)
+                        if (attempt < 5) delay(400L)
                     }
                 }
+                val groupListLoaded = newGroupList ?: return@runOnDefaultDispatcher
 
                 var selectedGroup = selectedItem?.groupId ?: DataStore.currentGroupId()
                 var set = false
                 if (selectedGroup > 0L) {
-                    selectedGroupIndex = newGroupList.indexOfFirst { it.id == selectedGroup }
+                    selectedGroupIndex = groupListLoaded.indexOfFirst { it.id == selectedGroup }
                     set = true
                 } else if (groupList.size == 1) {
                     selectedGroup = groupList[0].id
@@ -1039,7 +1056,7 @@ class ConfigurationFragment @JvmOverloads constructor(
                 }
                 if (runFunc != null) {
                     runFunc {
-                        groupList = newGroupList
+                        groupList = groupListLoaded
                         notifyDataSetChanged()
                         if (set) groupPager.setCurrentItem(selectedGroupIndex, false)
                         val hideTab = false // NekoBox++: always show the group tab bar

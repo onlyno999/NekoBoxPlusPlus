@@ -20,7 +20,11 @@ import io.nekohasekai.sagernet.databinding.LayoutRouteItemBinding
 import io.nekohasekai.sagernet.ktx.*
 import io.nekohasekai.sagernet.widget.ListListener
 import io.nekohasekai.sagernet.widget.UndoSnackbarManager
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 
 class RouteFragment : ToolbarFragment(R.layout.layout_route), Toolbar.OnMenuItemClickListener {
 
@@ -94,17 +98,32 @@ class RouteFragment : ToolbarFragment(R.layout.layout_route), Toolbar.OnMenuItem
         }).attachToRecyclerView(ruleListView)
     }
 
+    private var healJob: Job? = null
+
     override fun onResume() {
         super.onResume()
 
         // An empty rule list here means the initial load never
-        // landed (see reload()); ask again instead of showing
-        // only the document card.
-        if (::ruleAdapter.isInitialized && ruleAdapter.ruleList.isEmpty()) {
-            runOnDefaultDispatcher {
-                ruleAdapter.reload()
+        // landed (see reload()); keep asking while the page is
+        // on screen until data lands, instead of showing only
+        // the document card.
+        healJob?.cancel()
+        healJob = lifecycleScope.launch {
+            var rounds = 0
+            while (isActive && ::ruleAdapter.isInitialized &&
+                ruleAdapter.ruleList.isEmpty() && rounds < 40) {
+                runOnDefaultDispatcher {
+                    ruleAdapter.reload()
+                }
+                delay(1500L)
+                rounds++
             }
         }
+    }
+
+    override fun onPause() {
+        healJob?.cancel()
+        super.onPause()
     }
 
     override fun onDestroy() {

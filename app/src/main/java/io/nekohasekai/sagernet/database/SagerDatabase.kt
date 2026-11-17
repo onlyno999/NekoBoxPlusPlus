@@ -28,6 +28,13 @@ import kotlinx.coroutines.launch
 abstract class SagerDatabase : RoomDatabase() {
 
     companion object {
+        // Dedicated pool for database work. Page reads used to
+        // queue on the shared default dispatcher behind
+        // subscription updates and speed tests; a read stuck in
+        // that queue was the blank pages' root cause.
+        private val dbExecutor: java.util.concurrent.Executor =
+            java.util.concurrent.Executors.newCachedThreadPool()
+
         @OptIn(DelicateCoroutinesApi::class)
         @Suppress("EXPERIMENTAL_API_USAGE")
         val instance by lazy {
@@ -38,7 +45,8 @@ abstract class SagerDatabase : RoomDatabase() {
                 .allowMainThreadQueries()
                 .enableMultiInstanceInvalidation()
                 .fallbackToDestructiveMigration()
-                .setQueryExecutor { GlobalScope.launch { it.run() } }
+                .setQueryExecutor(dbExecutor)
+                .setTransactionExecutor(dbExecutor)
                 .build()
         }
 

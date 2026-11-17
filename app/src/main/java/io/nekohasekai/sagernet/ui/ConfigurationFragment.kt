@@ -97,6 +97,7 @@ import io.nekohasekai.sagernet.ui.profile.WireGuardSettingsActivity
 import io.nekohasekai.sagernet.widget.QRCodeDialog
 import io.nekohasekai.sagernet.widget.UndoSnackbarManager
 import kotlinx.coroutines.DelicateCoroutinesApi
+import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -251,16 +252,31 @@ class ConfigurationFragment @JvmOverloads constructor(
         DataStore.profileCacheStore.registerChangeListener(this)
     }
 
+    private var pagerHealJob: Job? = null
+
     override fun onResume() {
         super.onResume()
 
         // Foreground return with a still-empty pager means the
         // initial group load never landed (its result post was
-        // dropped, or the query stalled behind the :bg process):
-        // ask again instead of sitting on a blank page.
-        if (::adapter.isInitialized && adapter.groupList.isEmpty()) {
-            adapter.reload(true)
+        // dropped, or the query stalled behind busy writers):
+        // keep asking while the page is on screen until data
+        // lands, instead of giving up after one try.
+        pagerHealJob?.cancel()
+        pagerHealJob = lifecycleScope.launch {
+            var rounds = 0
+            while (isActive && ::adapter.isInitialized &&
+                adapter.groupList.isEmpty() && rounds < 40) {
+                adapter.reload(true)
+                delay(1500L)
+                rounds++
+            }
         }
+    }
+
+    override fun onPause() {
+        pagerHealJob?.cancel()
+        super.onPause()
     }
 
     override fun onPreferenceDataStoreChanged(store: PreferenceDataStore, key: String) {
@@ -1207,6 +1223,8 @@ class ConfigurationFragment @JvmOverloads constructor(
             }
         }
 
+        private var pageHealJob: Job? = null
+
         override fun onResume() {
             super.onResume()
 
@@ -1232,6 +1250,32 @@ class ConfigurationFragment @JvmOverloads constructor(
             if (::configurationListView.isInitialized) {
                 configurationListView.requestFocus()
             }
+
+            // If the list is still empty (the load is stuck
+            // behind busy writers), keep asking while this page
+            // is on screen until data lands.
+            pageHealJob?.cancel()
+            pageHealJob = lifecycleScope.launch {
+                var rounds = 0
+                while (isActive && rounds < 40) {
+                    if (!::configurationListView.isInitialized) break
+                    if (configurationListView.size > 0) break
+                    delay(1500L)
+                    if (::configurationListView.isInitialized &&
+                        configurationListView.size == 0
+                    ) {
+                        runOnDefaultDispatcher {
+                            adapter?.reloadProfiles()
+                        }
+                    }
+                    rounds++
+                }
+            }
+        }
+
+        override fun onPause() {
+            pageHealJob?.cancel()
+            super.onPause()
         }
 
         fun checkOrderMenu() {

@@ -4,7 +4,7 @@
 
 **[GitHub Releases](https://github.com/onlyno999/NekoBoxPlusPlus/releases/latest)**
 
-当前版本：**1.4.8**
+当前版本：**1.4.9**
 
 ## 选哪个文件
 

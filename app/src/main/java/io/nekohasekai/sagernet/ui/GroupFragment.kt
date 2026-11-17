@@ -26,7 +26,11 @@ import io.nekohasekai.sagernet.ktx.*
 import io.nekohasekai.sagernet.widget.ListListener
 import io.nekohasekai.sagernet.widget.QRCodeDialog
 import io.nekohasekai.sagernet.widget.UndoSnackbarManager
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import moe.matsuri.nb4a.utils.Util
 import moe.matsuri.nb4a.utils.toBytesString
 import java.lang.NumberFormatException
@@ -322,17 +326,32 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
 
     }
 
+    private var healJob: Job? = null
+
     override fun onResume() {
         super.onResume()
 
         // Same heal as the configuration page: an empty list here
-        // means the initial load never landed, so ask again
-        // instead of sitting on a blank page.
-        if (::groupAdapter.isInitialized && groupAdapter.groupList.isEmpty()) {
-            runOnDefaultDispatcher {
-                groupAdapter.reload()
+        // means the initial load never landed. Keep asking while
+        // the page is on screen until data lands, instead of
+        // giving up after one try and sitting on a blank page.
+        healJob?.cancel()
+        healJob = lifecycleScope.launch {
+            var rounds = 0
+            while (isActive && ::groupAdapter.isInitialized &&
+                groupAdapter.groupList.isEmpty() && rounds < 40) {
+                runOnDefaultDispatcher {
+                    groupAdapter.reload()
+                }
+                delay(1500L)
+                rounds++
             }
         }
+    }
+
+    override fun onPause() {
+        healJob?.cancel()
+        super.onPause()
     }
 
     override fun onDestroy() {

@@ -360,7 +360,7 @@ object GroupBalancer {
     private suspend fun stallCheckTick(
         armed: Pair<Long, String>, selectedId: Long, service: ISagerNetService,
     ) {
-        val speed = runCatching { service.querySpeed() }.getOrNull() ?: return
+        val speed = runCatching { service.querySelectedSpeed() }.getOrNull() ?: return
         if (stallSampleFor != selectedId) {
             stallSampleFor = selectedId
             lastTxTotal = speed.txTotal

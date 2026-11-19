@@ -175,6 +175,24 @@ class TrafficLooper
 
             data.binder.lastSpeedData = speed
 
+            // Stall detection is scoped to the current group's
+            // own line: stash the selected profile's totals on
+            // their own, never mixed with rule-pool traffic that
+            // other groups' chains carry.
+            val selItem = idMap[DataStore.selectedProxy]
+            data.binder.lastSelectedSpeedData = if (selItem != null) {
+                SpeedDisplayData(
+                    selItem.txRate,
+                    selItem.rxRate,
+                    0L,
+                    0L,
+                    selItem.tx - selItem.txBase,
+                    selItem.rx - selItem.rxBase
+                )
+            } else {
+                speed
+            }
+
             // broadcast (MainActivity)
             if (data.state == BaseService.State.Connected
                 && data.binder.callbackIdMap.containsValue(SagerConnection.CONNECTION_ID_MAIN_ACTIVITY_FOREGROUND)

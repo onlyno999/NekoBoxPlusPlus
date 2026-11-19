@@ -503,6 +503,15 @@ fun buildConfig(
                         "LB pool " + io.nekohasekai.sagernet.geo.LbRef.tagFor(ref) +
                             ": no members with a known country; its rules fall back to the main line"
                     )
+                    io.nekohasekai.sagernet.ktx.Logs.w(
+                        "NBPP route pool " + io.nekohasekai.sagernet.geo.LbRef.tagFor(ref) +
+                            ": 0 members, rules fall back to main line"
+                    )
+                } else {
+                    io.nekohasekai.sagernet.ktx.Logs.i(
+                        "NBPP route pool " + io.nekohasekai.sagernet.geo.LbRef.tagFor(ref) +
+                            ": " + memberTags.size + " members"
+                    )
                 }
                 if (memberTags.isNotEmpty()) {
                     lbTags.add(io.nekohasekai.sagernet.geo.LbRef.tagFor(ref))

@@ -370,22 +370,10 @@ object GroupBalancer {
         lastTxTotal = speed.txTotal
         lastRxTotal = speed.rxTotal
         if (sentDelta <= 0L || recvDelta != 0L) return
-        // Never fight a standby round for the test machinery;
-        // the next tick re-evaluates with fresh totals.
-        if (roundRunning.get()) return
-        val profile = withContext(Dispatchers.IO) {
-            SagerDatabase.proxyDao.getById(selectedId)
-        } ?: return
-        val ok = runCatching { testPing(profile) }.getOrDefault(false)
-        if (ok) {
-            Log.i(TAG, "stall check: sent $sentDelta B, 0 B back, probe live; not the node")
-            return
-        }
-        Log.i(TAG, "stall check: sent $sentDelta B, 0 B back, probe timed out; failing over")
-        failOverFromRecord(armed.first, armed.second, selectedId)
-        healthForSelected = -1L
-        stallSampleFor = -1L
-        scope.launch { runSpeedRoundFor(armed.first, armed.second) }
+        // DIAG BUILD (test2): sampling + log only. The probe and
+        // the failover are disabled to bisect a route-pool
+        // regression reported against the first test build.
+        Log.i(TAG, "stall check (diag, no action): sent $sentDelta B, 0 B back")
     }
 
     /**

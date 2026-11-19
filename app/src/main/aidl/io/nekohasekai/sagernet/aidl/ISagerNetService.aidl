@@ -1,6 +1,7 @@
 package io.nekohasekai.sagernet.aidl;
 
 import io.nekohasekai.sagernet.aidl.ISagerNetServiceCallback;
+import io.nekohasekai.sagernet.aidl.SpeedDisplayData;
 
 interface ISagerNetService {
   int getState();
@@ -13,4 +14,5 @@ interface ISagerNetService {
   void resetTrafficStats();
   long queryDialFailures(String tag);
   void resetDialHealth(String tag);
+  SpeedDisplayData querySpeed();
 }

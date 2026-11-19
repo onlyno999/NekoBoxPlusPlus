@@ -12,6 +12,7 @@ import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.SagerNet
 import io.nekohasekai.sagernet.aidl.ISagerNetService
 import io.nekohasekai.sagernet.aidl.ISagerNetServiceCallback
+import io.nekohasekai.sagernet.aidl.SpeedDisplayData
 import io.nekohasekai.sagernet.bg.proto.ProxyInstance
 import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.database.SagerDatabase
@@ -146,6 +147,14 @@ class BaseService {
         override fun queryDialFailures(tag: String): Long {
             return runCatching { data?.proxy?.box?.queryDialFailures(tag) ?: 0L }
                 .getOrDefault(0L)
+        }
+
+        /** Latest main-line speed sample, fed by TrafficLooper. */
+        @Volatile
+        var lastSpeedData: SpeedDisplayData? = null
+
+        override fun querySpeed(): SpeedDisplayData {
+            return lastSpeedData ?: SpeedDisplayData()
         }
 
         override fun resetDialHealth(tag: String) {

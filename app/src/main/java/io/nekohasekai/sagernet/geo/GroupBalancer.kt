@@ -91,6 +91,9 @@ object GroupBalancer {
      *  belongs to; a change restarts the count. */
     @Volatile
     private var healthForSelected: Long = -1L
+    private var stallSampleFor: Long = -1L
+    private var lastTxTotal: Long = 0L
+    private var lastRxTotal: Long = 0L
 
     private fun keyOf(groupId: Long, countryCode: String) =
         "$groupId|${countryCode.uppercase()}"
@@ -337,6 +340,52 @@ object GroupBalancer {
             healthForSelected = -1L
             scope.launch { runSpeedRoundFor(armed.first, armed.second) }
         }
+        if (DataStore.selectedProxy == selectedId) {
+            stallCheckTick(armed, selectedId, service)
+        }
+    }
+
+    /**
+     * Stall check: a node can stay reachable - handshakes fine,
+     * tunnel up - yet return no data at all, which dial health
+     * cannot see. Every watchdog tick compares the main line's
+     * session totals: data went out in the last window and not
+     * one byte came back is suspicious, and one active probe
+     * confirms it on the spot. Probe timeout: the node is
+     * stalled, fail over exactly like a dead node. Probe alive:
+     * a slow server, not the node's fault, leave the line alone.
+     */
+    private suspend fun stallCheckTick(
+        armed: Pair<Long, String>, selectedId: Long, service: ISagerNetService,
+    ) {
+        val speed = runCatching { service.querySpeed() }.getOrNull() ?: return
+        if (stallSampleFor != selectedId) {
+            stallSampleFor = selectedId
+            lastTxTotal = speed.txTotal
+            lastRxTotal = speed.rxTotal
+            return
+        }
+        val sentDelta = speed.txTotal - lastTxTotal
+        val recvDelta = speed.rxTotal - lastRxTotal
+        lastTxTotal = speed.txTotal
+        lastRxTotal = speed.rxTotal
+        if (sentDelta <= 0L || recvDelta != 0L) return
+        // Never fight a standby round for the test machinery;
+        // the next tick re-evaluates with fresh totals.
+        if (roundRunning.get()) return
+        val profile = withContext(Dispatchers.IO) {
+            SagerDatabase.proxyDao.getById(selectedId)
+        } ?: return
+        val ok = runCatching { testPing(profile) }.getOrDefault(false)
+        if (ok) {
+            Log.i(TAG, "stall check: sent $sentDelta B, 0 B back, probe live; not the node")
+            return
+        }
+        Log.i(TAG, "stall check: sent $sentDelta B, 0 B back, probe timed out; failing over")
+        failOverFromRecord(armed.first, armed.second, selectedId)
+        healthForSelected = -1L
+        stallSampleFor = -1L
+        scope.launch { runSpeedRoundFor(armed.first, armed.second) }
     }
 
     /**

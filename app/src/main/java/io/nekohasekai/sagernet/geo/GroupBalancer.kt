@@ -370,10 +370,19 @@ object GroupBalancer {
         lastTxTotal = speed.txTotal
         lastRxTotal = speed.rxTotal
         if (sentDelta <= 0L || recvDelta != 0L) return
-        // DIAG BUILD (test2): sampling + log only. The probe and
-        // the failover are disabled to bisect a route-pool
-        // regression reported against the first test build.
-        Log.i(TAG, "stall check (diag, no action): sent $sentDelta B, 0 B back")
+        // TEST3 BUILD: the probe is back, the failover stays OFF.
+        // test2 (no probe, no failover) routed fine; this splits
+        // the last two suspects - probe vs failover/reload.
+        if (roundRunning.get()) return
+        val profile = withContext(Dispatchers.IO) {
+            SagerDatabase.proxyDao.getById(selectedId)
+        } ?: return
+        val ok = runCatching { testPing(profile) }.getOrDefault(false)
+        Log.i(
+            TAG,
+            "stall check (test3, probe only): sent " + sentDelta +
+                " B, 0 B back, probe " + (if (ok) "live" else "TIMED OUT (would fail over)")
+        )
     }
 
     /**

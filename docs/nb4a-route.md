@@ -34,3 +34,18 @@ googleapis.com,connectivitycheck.gstatic.com,www.google.com,play-fe.googleapis.c
 加完重连一次，商店就能正常下载了。不加这条、又开着中国域名/中国 IP 规则的话，商店就是下不了。
 
 > 注：1.4.6 起这三条规则已经内置在 App 里、默认开启（路由页可见），不用再手动添加。
+
+## Muse AI 分流规则
+
+Muse AI（muse.ai）用的是下面这些域名。想让 Muse 的流量固定走某条线时，自己加一条规则，把这些域名指到**代理**（也可以绑一个节点池）：
+
+- 类型：`domain`（域名）
+- 内容（整段复制粘贴）：
+
+```
+hatch.metaaivm.com,muse.ai,content-autofill.googleapis.com,graph.meta.ai,hatch-api.meta.ai,graph.facebook.com,b-www.facebook.com,scontent-lax7-1.xx.fbcdn.net
+```
+
+- 出口：代理（也可以绑一个节点池）
+
+加完重连一次生效。

@@ -43,7 +43,7 @@ Muse AI（muse.ai）用的是下面这些域名。想让 Muse 的流量固定走
 - 内容（整段复制粘贴）：
 
 ```
-hatch.metaaivm.com,muse.ai,content-autofill.googleapis.com,graph.meta.ai,hatch-api.meta.ai,graph.facebook.com,b-www.facebook.com,scontent-lax7-1.xx.fbcdn.net
+hatch.metaaivm.com,muse.ai,graph.meta.ai,hatch-api.meta.ai,graph.facebook.com,b-www.facebook.com,fbcdn.net
 ```
 
 - 出口：代理（也可以绑一个节点池）

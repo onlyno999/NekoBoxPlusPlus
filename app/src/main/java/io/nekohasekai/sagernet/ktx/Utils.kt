@@ -241,6 +241,10 @@ fun Fragment.startFilesForResult(
 }
 
 fun Fragment.needReload() {
+    // Async callers (DB writes, test callbacks) can land here after the
+    // fragment detached; getString()/snackbar() would crash on the dead
+    // context. A detached fragment has nothing to prompt anyway.
+    if (!isAdded || view == null) return
     if (DataStore.serviceState.started) {
         snackbar(getString(R.string.need_reload)).setAction(R.string.apply) {
             SagerNet.reloadService()
@@ -249,6 +253,7 @@ fun Fragment.needReload() {
 }
 
 fun Fragment.needRestart() {
+    if (!isAdded || view == null) return
     snackbar(R.string.need_restart).setAction(R.string.apply) {
         triggerFullRestart(requireContext())
     }.show()

@@ -74,6 +74,7 @@ import io.nekohasekai.sagernet.ktx.isIpAddress
 import io.nekohasekai.sagernet.ktx.onMainDispatcher
 import io.nekohasekai.sagernet.ktx.readableMessage
 import io.nekohasekai.sagernet.ktx.runOnDefaultDispatcher
+import io.nekohasekai.sagernet.ktx.runOnIoDispatcher
 import io.nekohasekai.sagernet.ktx.runOnLifecycleDispatcher
 import io.nekohasekai.sagernet.ktx.runOnMainDispatcher
 import io.nekohasekai.sagernet.ktx.scrollTo
@@ -1022,7 +1023,7 @@ class ConfigurationFragment @JvmOverloads constructor(
                 groupPager.unregisterOnPageChangeCallback(updateSelectedCallback)
             }
 
-            runOnDefaultDispatcher {
+            runOnIoDispatcher {
                 // Same one-shot fragility as the inner pages, one
                 // level up: if this read died while the database
                 // was busy, the pager got no groups at all and
@@ -1054,9 +1055,9 @@ class ConfigurationFragment @JvmOverloads constructor(
                 }
                 if (finished == null) {
                     DbWatchdog.dumpOnce("ConfigurationFragment.reload")
-                    return@runOnDefaultDispatcher
+                    return@runOnIoDispatcher
                 }
-                val groupListLoaded = newGroupList ?: return@runOnDefaultDispatcher
+                val groupListLoaded = newGroupList ?: return@runOnIoDispatcher
 
                 var selectedGroup = selectedItem?.groupId ?: DataStore.currentGroupId()
                 var set = false
@@ -1251,7 +1252,7 @@ class ConfigurationFragment @JvmOverloads constructor(
             // stays empty until the next resume.
             if (::configurationListView.isInitialized && configurationListView.size == 0) {
                 configurationListView.adapter = adapter
-                runOnDefaultDispatcher {
+                runOnIoDispatcher {
                     adapter?.reloadProfiles()
                 }
             }
@@ -1273,7 +1274,7 @@ class ConfigurationFragment @JvmOverloads constructor(
                     if (::configurationListView.isInitialized &&
                         configurationListView.size == 0
                     ) {
-                        runOnDefaultDispatcher {
+                        runOnIoDispatcher {
                             adapter?.reloadProfiles()
                         }
                     }
@@ -1927,7 +1928,7 @@ class ConfigurationFragment @JvmOverloads constructor(
                     }
                     profilesReloadRunning = true
                 }
-                runOnDefaultDispatcher {
+                runOnIoDispatcher {
                     try {
                         do {
                             synchronized(profilesReloadLock) { profilesReloadDirty = false }

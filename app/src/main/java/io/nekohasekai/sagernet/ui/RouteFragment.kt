@@ -147,7 +147,7 @@ class RouteFragment : ToolbarFragment(R.layout.layout_route), Toolbar.OnMenuItem
                 MaterialAlertDialogBuilder(activity).setTitle(R.string.confirm)
                     .setMessage(R.string.clear_profiles_message)
                     .setPositiveButton(R.string.yes) { _, _ ->
-                        runOnDefaultDispatcher {
+                        runOnIoDispatcher {
                             SagerDatabase.rulesDao.reset()
                             DataStore.rulesFirstCreate = false
                             ruleAdapter.reload()
@@ -197,7 +197,7 @@ class RouteFragment : ToolbarFragment(R.layout.layout_route), Toolbar.OnMenuItem
         }
 
         init {
-            runOnDefaultDispatcher {
+            runOnIoDispatcher {
                 reload()
             }
         }

@@ -209,7 +209,7 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
         init {
             setHasStableIds(true)
 
-            runOnDefaultDispatcher {
+            runOnIoDispatcher {
                 reload()
             }
         }
@@ -271,7 +271,7 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
 
         override fun commit(actions: List<Pair<Int, ProxyGroup>>) {
             val groups = actions.map { it.second }
-            runOnDefaultDispatcher {
+            runOnIoDispatcher {
                 GroupManager.deleteGroup(groups)
                 reload()
             }
@@ -574,7 +574,7 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
 
             groupUser.text = subscription?.username ?: ""
 
-            runOnDefaultDispatcher {
+            runOnIoDispatcher {
                 val size = SagerDatabase.proxyDao.countByGroup(group.id)
                 onMainDispatcher {
                     // The fragment may have detached (or this holder may have

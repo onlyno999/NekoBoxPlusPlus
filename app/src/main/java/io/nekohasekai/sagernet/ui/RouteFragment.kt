@@ -15,6 +15,7 @@ import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.database.ProfileManager
 import io.nekohasekai.sagernet.database.RuleEntity
 import io.nekohasekai.sagernet.database.SagerDatabase
+import io.nekohasekai.sagernet.database.DbWatchdog
 import io.nekohasekai.sagernet.databinding.LayoutEmptyRouteBinding
 import io.nekohasekai.sagernet.databinding.LayoutRouteItemBinding
 import io.nekohasekai.sagernet.ktx.*
@@ -25,6 +26,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 
 class RouteFragment : ToolbarFragment(R.layout.layout_route), Toolbar.OnMenuItemClickListener {
 
@@ -99,6 +101,7 @@ class RouteFragment : ToolbarFragment(R.layout.layout_route), Toolbar.OnMenuItem
     }
 
     private var healJob: Job? = null
+    private var healReloadJob: Job? = null
 
     override fun onResume() {
         super.onResume()
@@ -112,8 +115,10 @@ class RouteFragment : ToolbarFragment(R.layout.layout_route), Toolbar.OnMenuItem
             var rounds = 0
             while (isActive && ::ruleAdapter.isInitialized &&
                 ruleAdapter.ruleList.isEmpty() && rounds < 40) {
-                runOnDefaultDispatcher {
-                    ruleAdapter.reload()
+                if (healReloadJob?.isActive != true) {
+                    healReloadJob = runOnIoDispatcher {
+                        ruleAdapter.reload()
+                    }
                 }
                 delay(1500L)
                 rounds++
@@ -167,6 +172,7 @@ class RouteFragment : ToolbarFragment(R.layout.layout_route), Toolbar.OnMenuItem
             // lost one-shot load left only the document card on
             // screen. Retry before giving up.
             var loaded: List<RuleEntity>? = null
+            val finished = withTimeoutOrNull(12_000L) {
             for (attempt in 0 until 5) {
                 try {
                     loaded = ProfileManager.getRules()
@@ -175,6 +181,12 @@ class RouteFragment : ToolbarFragment(R.layout.layout_route), Toolbar.OnMenuItem
                     Logs.w(e)
                     delay(400L)
                 }
+            }
+            true
+            }
+            if (finished == null) {
+                DbWatchdog.dumpOnce("RouteFragment.reload")
+                return
             }
             val rules = loaded ?: return
             ruleListView.post {

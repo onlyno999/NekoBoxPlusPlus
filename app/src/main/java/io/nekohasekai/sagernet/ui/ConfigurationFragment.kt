@@ -54,6 +54,7 @@ import io.nekohasekai.sagernet.database.ProfileManager
 import io.nekohasekai.sagernet.database.ProxyEntity
 import io.nekohasekai.sagernet.database.ProxyGroup
 import io.nekohasekai.sagernet.database.SagerDatabase
+import io.nekohasekai.sagernet.database.DbWatchdog
 import io.nekohasekai.sagernet.database.preference.OnPreferenceDataStoreChangeListener
 import io.nekohasekai.sagernet.databinding.LayoutProfileListBinding
 import io.nekohasekai.sagernet.databinding.LayoutProgressListBinding
@@ -99,6 +100,7 @@ import io.nekohasekai.sagernet.widget.UndoSnackbarManager
 import kotlinx.coroutines.DelicateCoroutinesApi
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.isActive
@@ -1028,6 +1030,7 @@ class ConfigurationFragment @JvmOverloads constructor(
                 // included - stayed blank for good. Retry while
                 // the database is busy.
                 var newGroupList: ArrayList<ProxyGroup>? = null
+                val finished = withTimeoutOrNull(12_000L) {
                 for (attempt in 0 until 6) {
                     try {
                         val fetched = ArrayList(SagerDatabase.groupDao.allGroups())
@@ -1046,6 +1049,12 @@ class ConfigurationFragment @JvmOverloads constructor(
                         Logs.w(e)
                         if (attempt < 5) delay(400L)
                     }
+                }
+                true
+                }
+                if (finished == null) {
+                    DbWatchdog.dumpOnce("ConfigurationFragment.reload")
+                    return@runOnDefaultDispatcher
                 }
                 val groupListLoaded = newGroupList ?: return@runOnDefaultDispatcher
 
@@ -1937,6 +1946,7 @@ class ConfigurationFragment @JvmOverloads constructor(
                 // have profiles; either used to leave the whole tab
                 // blank for the visit. Retry a few times.
                 var loaded: List<ProxyEntity>? = null
+                val finished = withTimeoutOrNull(12_000L) {
                 for (attempt in 0 until 5) {
                     try {
                         var fetched = SagerDatabase.proxyDao.getByGroup(proxyGroup.id)
@@ -1962,6 +1972,12 @@ class ConfigurationFragment @JvmOverloads constructor(
                         Logs.w(e)
                         if (attempt < 4) delay(300L)
                     }
+                }
+                true
+                }
+                if (finished == null) {
+                    DbWatchdog.dumpOnce("ConfigurationFragment.reloadProfiles")
+                    return
                 }
                 val newProfiles = loaded ?: return
                 val newProfileIds = newProfiles.map { it.id }

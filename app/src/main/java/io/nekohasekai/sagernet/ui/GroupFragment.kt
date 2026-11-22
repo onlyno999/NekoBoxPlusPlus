@@ -31,6 +31,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import moe.matsuri.nb4a.utils.Util
 import moe.matsuri.nb4a.utils.toBytesString
 import java.lang.NumberFormatException
@@ -176,6 +177,7 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
             // few times, and only touch the list on the main
             // thread once a read has actually succeeded.
             var loaded: MutableList<ProxyGroup>? = null
+            val finished = withTimeoutOrNull(12_000L) {
             for (attempt in 0 until 5) {
                 try {
                     val fetched = SagerDatabase.groupDao.allGroups().toMutableList()
@@ -189,6 +191,12 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
                     Logs.w(e)
                     delay(400L)
                 }
+            }
+            true
+            }
+            if (finished == null) {
+                DbWatchdog.dumpOnce("GroupFragment.reload")
+                return
             }
             val groups = loaded ?: return
             groupListView.post {
@@ -327,6 +335,7 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
     }
 
     private var healJob: Job? = null
+    private var healReloadJob: Job? = null
 
     override fun onResume() {
         super.onResume()
@@ -340,8 +349,10 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
             var rounds = 0
             while (isActive && ::groupAdapter.isInitialized &&
                 groupAdapter.groupList.isEmpty() && rounds < 40) {
-                runOnDefaultDispatcher {
-                    groupAdapter.reload()
+                if (healReloadJob?.isActive != true) {
+                    healReloadJob = runOnIoDispatcher {
+                        groupAdapter.reload()
+                    }
                 }
                 delay(1500L)
                 rounds++

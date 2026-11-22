@@ -415,7 +415,7 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
                         val links = profiles.joinToString("\n") { it.toStdLink(compact = true) }
                         onMainDispatcher {
                             SagerNet.trySetPrimaryClip(links)
-                            snackbar(getString(R.string.copy_toast_msg)).show()
+                            snackbar(app.getString(R.string.copy_toast_msg)).show()
                         }
                     }
                 }
@@ -577,27 +577,34 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
             runOnDefaultDispatcher {
                 val size = SagerDatabase.proxyDao.countByGroup(group.id)
                 onMainDispatcher {
-                    @Suppress("DEPRECATION") when (group.type) {
-                        GroupType.BASIC -> {
-                            if (size == 0L) {
-                                groupStatus.setText(R.string.group_status_empty)
-                            } else {
-                                groupStatus.text = getString(R.string.group_status_proxies, size)
-                            }
-                        }
-
-                        GroupType.SUBSCRIPTION -> {
-                            groupStatus.text = if (size == 0L) {
-                                getString(R.string.group_status_empty_subscription)
-                            } else {
-                                val date = Date(group.subscription!!.lastUpdated * 1000L)
-                                getString(
-                                    R.string.group_status_proxies_subscription,
-                                    size,
-                                    "${date.month + 1} - ${date.date}"
-                                )
+                    // The fragment may have detached (or this holder may have
+                    // been rebound to another group) while the count query was
+                    // running. Never use the fragment's context here: strings
+                    // come from the app context, and a stale result is dropped.
+                    if (proxyGroup.id == group.id) {
+                        @Suppress("DEPRECATION") when (group.type) {
+                            GroupType.BASIC -> {
+                                if (size == 0L) {
+                                    groupStatus.setText(R.string.group_status_empty)
+                                } else {
+                                    groupStatus.text =
+                                        app.getString(R.string.group_status_proxies, size)
+                                }
                             }
 
+                            GroupType.SUBSCRIPTION -> {
+                                groupStatus.text = if (size == 0L) {
+                                    app.getString(R.string.group_status_empty_subscription)
+                                } else {
+                                    val date = Date(group.subscription!!.lastUpdated * 1000L)
+                                    app.getString(
+                                        R.string.group_status_proxies_subscription,
+                                        size,
+                                        "${date.month + 1} - ${date.date}"
+                                    )
+                                }
+
+                            }
                         }
                     }
                 }

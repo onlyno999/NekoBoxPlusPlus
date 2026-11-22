@@ -618,6 +618,7 @@ object GroupBalancer {
      * A pool of five or fewer is covered whole in one round.
      */
     suspend fun runSpeedRoundFor(groupId: Long, cc: String) {
+        if (NewNodeTester.active) return
         if (!roundRunning.compareAndSet(false, true)) return
         val doneSignal = kotlinx.coroutines.CompletableDeferred<Unit>()
         roundDone = doneSignal

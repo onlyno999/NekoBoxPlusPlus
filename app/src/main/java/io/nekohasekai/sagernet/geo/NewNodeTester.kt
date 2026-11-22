@@ -30,6 +30,18 @@ object NewNodeTester {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val lock = Mutex()
 
+    /**
+     * True while a post-update test run is in flight. The group
+     * balancer reads this and defers its standby rounds: update
+     * testing and balancer rounds used to stack their native
+     * test boxes on top of each other (plus the geo probe
+     * fan-out), which froze and killed the UI process during
+     * subscription updates.
+     */
+    @Volatile
+    var active: Boolean = false
+        private set
+
     /** Fire-and-forget: test only the given newly arrived profiles. */
     fun enqueue(context: Context, groupId: Long, profiles: List<ProxyEntity>) {
         if (profiles.isEmpty()) return
@@ -43,16 +55,27 @@ object NewNodeTester {
     }
 
     private suspend fun test(context: Context, groupId: Long, profiles: List<ProxyEntity>) {
-        Log.i(TAG, "group $groupId: ${profiles.size} new profiles, batches of $BATCH")
-        for (chunk in profiles.chunked(BATCH)) {
-            GeoProbe.probeProfiles(context, chunk)
-            withContext(Dispatchers.IO) {
-                chunk.map { profile ->
-                    async { runCatching { GroupBalancer.testPing(profile) } }
-                }.awaitAll()
+        active = true
+        try {
+            Log.i(TAG, "group $groupId: ${profiles.size} new profiles, batches of $BATCH")
+            for (chunk in profiles.chunked(BATCH)) {
+                GeoProbe.probeProfiles(context, chunk)
+                // At most 3 test boxes at a time: a batch used to
+                // fire all 10 at once, and together with the geo
+                // probe fan-out that piled dozens of native boxes
+                // into the UI process during updates.
+                for (sub in chunk.chunked(3)) {
+                    withContext(Dispatchers.IO) {
+                        sub.map { profile ->
+                            async { runCatching { GroupBalancer.testPing(profile) } }
+                        }.awaitAll()
+                    }
+                }
+                GroupManager.postReload(groupId)
             }
-            GroupManager.postReload(groupId)
+            Log.i(TAG, "group $groupId: new-profile testing done")
+        } finally {
+            active = false
         }
-        Log.i(TAG, "group $groupId: new-profile testing done")
     }
 }

@@ -234,10 +234,12 @@ object GeoProbe {
     }
 
     /**
-     * Probe the given profiles' exit countries: at most 16 box
+     * Probe the given profiles' exit countries: at most 6 box
      * instances at a time (each one is a full native box; the old
-     * 100-way fan-out spiked memory), and the whole phase yields
-     * the moment the user starts a manual connection test.
+     * 100-way fan-out spiked memory, and even 16 stacked with the
+     * post-update ping batches and balancer rounds froze the UI
+     * process during subscription updates), and the whole phase
+     * yields the moment the user starts a manual connection test.
      */
     suspend fun probeProfiles(
         context: Context,
@@ -248,7 +250,7 @@ object GeoProbe {
             if (targets.isEmpty()) return@withContext
             val queue = ConcurrentLinkedQueue(targets)
             val jobs = mutableListOf<kotlinx.coroutines.Job>()
-            repeat(minOf(16, targets.size)) {
+            repeat(minOf(6, targets.size)) {
                 jobs.add(launch {
                     while (true) {
                         if (DataStore.runningTest) break

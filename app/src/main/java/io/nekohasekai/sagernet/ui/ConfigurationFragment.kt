@@ -1895,6 +1895,15 @@ class ConfigurationFragment @JvmOverloads constructor(
             private var profilesReloadDirty = false
 
             fun reloadProfiles() {
+                // While this group is mid-update, skip the rebuild:
+                // the updater fires reload events per DNS lookup and
+                // per test batch, and rebuilding the whole sectioned
+                // list for each one saturates the main thread (the
+                // blank -> freeze -> crash during subscription
+                // updates). finishUpdate() removes the group from
+                // `updating` before its final postUpdate, so the
+                // closing reload still runs and lands complete.
+                if (GroupUpdater.updating.contains(proxyGroup.id)) return
                 // A big subscription update fires this in bursts
                 // (listener callbacks, one per test batch). Running
                 // every burst at once flooded the main thread with

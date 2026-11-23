@@ -146,7 +146,12 @@ class TrafficLooper
                 proxy.box.setV2rayStats(tags.joinToString("\n"))
             }
 
-            trafficUpdater.updateAll()
+            // Poll every profile's counters, not just the main line's:
+            // group members (rule/LB pools, racing winners) are counted
+            // per member in the core, but their items stay "ignored"
+            // (they are not part of the main speed sum), so without
+            // this their traffic display never moves.
+            trafficUpdater.updateAll(pollIgnored = profileTrafficStatistics)
             if (!sc.isActive) return
 
             // add all non-bypass to "main"
@@ -158,9 +163,15 @@ class TrafficLooper
                 if (!it.ignore) {
                     mainTxRate += it.txRate
                     mainRxRate += it.rxRate
+                    // Session totals stay scoped to the main line, as
+                    // before: ignored items are polled for their own
+                    // per-profile display only (a byte through a group
+                    // is counted both under "proxy" and under the
+                    // member that carried it, so summing them here
+                    // would double the main total).
+                    mainTx += it.tx - it.txBase
+                    mainRx += it.rx - it.rxBase
                 }
-                mainTx += it.tx - it.txBase
-                mainRx += it.rx - it.rxBase
             }
 
             // speed

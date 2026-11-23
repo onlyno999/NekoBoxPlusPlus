@@ -48,10 +48,10 @@ class TrafficUpdater(
         )
     }
 
-    suspend fun updateAll() {
+    suspend fun updateAll(pollIgnored: Boolean = false) {
         val updated = mutableMapOf<String, TrafficLooperData>() // diffs
         items.forEach { item ->
-            if (item.ignore) return@forEach
+            if (item.ignore && !pollIgnored) return@forEach
             var diff = updated[item.tag]
             // query a tag only once
             if (diff == null) {

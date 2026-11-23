@@ -150,8 +150,6 @@ abstract class ProfileSettingsActivity<T : AbstractBean>(
 
     }
 
-    val child by lazy { supportFragmentManager.findFragmentById(R.id.settings) as MyPreferenceFragmentCompat }
-
     override fun onCreateOptionsMenu(menu: Menu): Boolean {
         menuInflater.inflate(R.menu.profile_config_menu, menu)
         menu.findItem(R.id.action_move)?.apply {
@@ -172,7 +170,15 @@ abstract class ProfileSettingsActivity<T : AbstractBean>(
         return true
     }
 
-    override fun onOptionsItemSelected(item: MenuItem) = child.onOptionsItemSelected(item)
+    override fun onOptionsItemSelected(item: MenuItem): Boolean {
+        // The settings fragment is attached asynchronously; a toolbar tap
+        // can land before it exists (or after it was removed). The old lazy
+        // `child` lookup dereferenced null in that window and crashed.
+        val fragment = supportFragmentManager.findFragmentById(R.id.settings)
+            as? MyPreferenceFragmentCompat
+        return fragment?.onOptionsItemSelected(item)
+            ?: super.onOptionsItemSelected(item)
+    }
 
     override fun onBackPressed() {
         if (DataStore.dirty) UnsavedChangesDialogFragment().apply { key() }

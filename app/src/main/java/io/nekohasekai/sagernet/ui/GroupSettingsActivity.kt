@@ -224,12 +224,18 @@ class GroupSettingsActivity(
                 }
 
                 onMainDispatcher {
-                    supportFragmentManager.beginTransaction()
-                        .replace(R.id.settings, MyPreferenceFragmentCompat())
-                        .commit()
+                    // The bean load above runs on a background dispatcher; if the
+                    // user already left this screen, the FragmentManager is gone
+                    // and committing crashes with "FragmentManager has been
+                    // destroyed". Skip the whole block in that case.
+                    if (!isFinishing && !isDestroyed && !supportFragmentManager.isDestroyed) {
+                        supportFragmentManager.beginTransaction()
+                            .replace(R.id.settings, MyPreferenceFragmentCompat())
+                            .commit()
 
-                    DataStore.dirty = false
-                    DataStore.profileCacheStore.registerChangeListener(this@GroupSettingsActivity)
+                        DataStore.dirty = false
+                        DataStore.profileCacheStore.registerChangeListener(this@GroupSettingsActivity)
+                    }
                 }
             }
 

@@ -78,9 +78,9 @@ class TileService : BaseTileService(), SagerConnection.Callback {
                 }
             }
             label = label ?: getString(R.string.app_name)
-            if (serviceState == lastTileState && label == lastTileLabel) return@apply
+            if (serviceState == lastTileState && label?.toString() == lastTileLabel) return@apply
             lastTileState = serviceState
-            lastTileLabel = label
+            lastTileLabel = label?.toString()
             updateTile()
         }
     }

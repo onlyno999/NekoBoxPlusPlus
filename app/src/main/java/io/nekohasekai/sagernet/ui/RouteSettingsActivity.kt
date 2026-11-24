@@ -240,9 +240,16 @@ class RouteSettingsActivity(
             setHomeAsUpIndicator(R.drawable.ic_navigation_close)
         }
 
-        if (savedInstanceState == null) {
-            val editingId = intent.getLongExtra(EXTRA_ROUTE_ID, 0L)
-            DataStore.editingId = editingId
+        // Always (re)read the intent extras: after a recreation the fields below
+        // are unset on the new instance. The load + fragment commit only runs
+        // when the container is actually empty. Gating it on
+        // savedInstanceState == null breaks when the activity is recreated
+        // before the first commit lands: the new instance shows the toolbar,
+        // never loads, and the screen stays blank forever (and on the old
+        // code the late commit from the dead instance crashed instead).
+        val editingId = intent.getLongExtra(EXTRA_ROUTE_ID, 0L)
+        DataStore.editingId = editingId
+        if (supportFragmentManager.findFragmentById(R.id.settings) == null) {
             runOnDefaultDispatcher {
                 if (editingId == 0L) {
                     init(intent.getStringExtra(EXTRA_PACKAGE_NAME))
@@ -258,12 +265,18 @@ class RouteSettingsActivity(
                 }
 
                 onMainDispatcher {
-                    supportFragmentManager.beginTransaction()
-                        .replace(R.id.settings, MyPreferenceFragmentCompat())
-                        .commit()
+                    // The bean load above runs on a background dispatcher; if the
+                    // user already left this screen, the FragmentManager is gone
+                    // and committing crashes with "FragmentManager has been
+                    // destroyed". Skip the whole block in that case.
+                    if (!isFinishing && !isDestroyed && !supportFragmentManager.isDestroyed) {
+                        supportFragmentManager.beginTransaction()
+                            .replace(R.id.settings, MyPreferenceFragmentCompat())
+                            .commit()
 
-                    DataStore.dirty = false
-                    DataStore.profileCacheStore.registerChangeListener(this@RouteSettingsActivity)
+                        DataStore.dirty = false
+                        DataStore.profileCacheStore.registerChangeListener(this@RouteSettingsActivity)
+                    }
                 }
             }
 

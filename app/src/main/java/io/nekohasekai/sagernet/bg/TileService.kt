@@ -17,6 +17,8 @@ class TileService : BaseTileService(), SagerConnection.Callback {
         Icon.createWithResource(this, R.drawable.ic_tile_switch)
     }
     private var tapPending = false
+    private var lastTileState: BaseService.State? = null
+    private var lastTileLabel: String? = null
 
     private val connection = SagerConnection(SagerConnection.CONNECTION_ID_TILE)
     override fun stateChanged(state: BaseService.State, profileName: String?, msg: String?) =
@@ -76,6 +78,9 @@ class TileService : BaseTileService(), SagerConnection.Callback {
                 }
             }
             label = label ?: getString(R.string.app_name)
+            if (serviceState == lastTileState && label == lastTileLabel) return@apply
+            lastTileState = serviceState
+            lastTileLabel = label
             updateTile()
         }
     }

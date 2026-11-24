@@ -20,6 +20,7 @@ import libcore.NB4AInterface
 import java.net.InetSocketAddress
 
 class NativeInterface : BoxPlatformInterface, NB4AInterface {
+    private var lastProxySelectedTag: String? = null
 
     //  libbox interface
 
@@ -86,6 +87,8 @@ class NativeInterface : BoxPlatformInterface, NB4AInterface {
             Logs.d("other selector: $selectorTag")
             return
         }
+        if (tag == lastProxySelectedTag) return
+        lastProxySelectedTag = tag
         Libcore.resetAllConnections(true)
         DataStore.baseService?.apply {
             runOnDefaultDispatcher {

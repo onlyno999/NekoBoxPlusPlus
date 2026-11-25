@@ -54,6 +54,26 @@ abstract class SagerDatabase : RoomDatabase() {
         val proxyDao get() = instance.proxyDao()
         val rulesDao get() = instance.rulesDao()
 
+        // Independent per-page database instance: same data file, own
+        // connection pool. A page's reads never queue behind another
+        // page's subscription updates or speed tests, which was the
+        // blank-pages root cause. Multi-instance invalidation
+        // (already enabled above) keeps each instance's view fresh.
+        // No extra data is stored: the file is shared, only the
+        // connection is separate, so the app does not grow.
+        fun newPageInstance(): SagerDatabase {
+            return Room.databaseBuilder(
+                SagerNet.application, SagerDatabase::class.java, Key.DB_PROFILE
+            )
+                .setJournalMode(JournalMode.WRITE_AHEAD_LOGGING)
+                .allowMainThreadQueries()
+                .enableMultiInstanceInvalidation()
+                .fallbackToDestructiveMigration()
+                .setQueryExecutor(java.util.concurrent.Executors.newCachedThreadPool())
+                .setTransactionExecutor(java.util.concurrent.Executors.newCachedThreadPool())
+                .build()
+        }
+
     }
 
     abstract fun groupDao(): ProxyGroup.Dao

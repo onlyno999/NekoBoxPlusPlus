@@ -87,7 +87,8 @@ abstract class ProfileSettingsActivity<T : AbstractBean>(
     abstract fun T.init()
     abstract fun T.serialize()
 
-    val proxyEntity by lazy { SagerDatabase.proxyDao.getById(DataStore.editingId) }
+    private val pageDb by lazy { SagerDatabase.newPageInstance() }
+    val proxyEntity by lazy { pageDb.proxyDao().getById(DataStore.editingId) }
     protected var isSubscription by Delegates.notNull<Boolean>()
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -110,22 +111,32 @@ abstract class ProfileSettingsActivity<T : AbstractBean>(
         isSubscription = intent.getBooleanExtra(EXTRA_IS_SUBSCRIPTION, false)
         DataStore.editingId = editingId
         if (supportFragmentManager.findFragmentById(R.id.settings) == null) {
-            runOnDefaultDispatcher {
-                if (editingId == 0L) {
-                    DataStore.editingGroup = DataStore.selectedGroupForImport()
-                    createEntity().applyDefaultValues().init()
-                } else {
-                    if (proxyEntity == null) {
-                        onMainDispatcher {
-                            finish()
+            runOnIoDispatcher {
+                val loaded = try {
+                    if (editingId == 0L) {
+                        DataStore.editingGroup = DataStore.selectedGroupForImport()
+                        createEntity().applyDefaultValues().init()
+                        true
+                    } else {
+                        val entity = proxyEntity
+                        if (entity == null) {
+                            false
+                        } else {
+                            DataStore.editingGroup = entity.groupId
+                            (entity.requireBean() as T).init()
+                            true
                         }
-                        return@runOnDefaultDispatcher
                     }
-                    DataStore.editingGroup = proxyEntity!!.groupId
-                    (proxyEntity!!.requireBean() as T).init()
+                } catch (e: Exception) {
+                    false
                 }
-
                 onMainDispatcher {
+                    if (!loaded) {
+                        // Read failed or the node is gone: close instead of
+                        // leaving a blank page behind.
+                        finish()
+                        return@onMainDispatcher
+                    }
                     // The bean load above runs on a background dispatcher; if the
                     // user already left this screen, the FragmentManager is gone
                     // and committing crashes with "FragmentManager has been
@@ -165,8 +176,8 @@ abstract class ProfileSettingsActivity<T : AbstractBean>(
         menuInflater.inflate(R.menu.profile_config_menu, menu)
         menu.findItem(R.id.action_move)?.apply {
             if (DataStore.editingId != 0L // not new profile
-                && SagerDatabase.groupDao.getById(DataStore.editingGroup)?.type == GroupType.BASIC // not in subscription group
-                && SagerDatabase.groupDao.allGroups()
+                && pageDb.groupDao().getById(DataStore.editingGroup)?.type == GroupType.BASIC // not in subscription group
+                && pageDb.groupDao().allGroups()
                     .filter { it.type == GroupType.BASIC }.size > 1 // have other basic group
             ) isVisible = true
         }
@@ -203,6 +214,7 @@ abstract class ProfileSettingsActivity<T : AbstractBean>(
 
     override fun onDestroy() {
         DataStore.profileCacheStore.unregisterChangeListener(this)
+        runCatching { pageDb.close() }
         super.onDestroy()
     }
 
@@ -353,7 +365,7 @@ abstract class ProfileSettingsActivity<T : AbstractBean>(
                     val ent = activity.proxyEntity!!
                     orientation = LinearLayout.VERTICAL
 
-                    SagerDatabase.groupDao.allGroups()
+                    pageDb.groupDao().allGroups()
                         .filter { it.type == GroupType.BASIC && it.id != ent.groupId }
                         .forEach { group ->
                             LayoutGroupItemBinding.inflate(layoutInflater, this, true).apply {

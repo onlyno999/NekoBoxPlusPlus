@@ -144,6 +144,10 @@ object GroupBalancer {
      * Light or unlight a pool. Lighting one pool replaces any
      * other lit pool anywhere (front-page rule) and immediately
      * runs a round that steers the main connection into it.
+     * The toggle changes the built config (the main line becomes
+     * the pool's urltest group, or back to a single node), so the
+     * running service reloads once to pick it up -- even when the
+     * steer kept the same node.
      */
     fun setArmed(context: Context, groupId: Long, countryCode: String, on: Boolean) {
         val pair = groupId to countryCode.uppercase()
@@ -154,6 +158,7 @@ object GroupBalancer {
             scope.launch {
                 runRegionSweep()
                 steerIntoPool(pair.first, pair.second)
+                if (DataStore.serviceState.canStop) SagerNet.reloadService()
                 runSpeedRoundFor(pair.first, pair.second)
             }
         } else {
@@ -161,6 +166,7 @@ object GroupBalancer {
                 prefs.edit().remove(KEY_ARMED).apply()
             }
             if (armedPair(context) == null) stopLoops()
+            if (DataStore.serviceState.canStop) SagerNet.reloadService()
         }
     }
 
@@ -444,9 +450,6 @@ object GroupBalancer {
         ProfileManager.postUpdate(previous)
         ProfileManager.postUpdate(best.id)
         Log.i(TAG, "arm steer -> ${best.requireBean().displayName()} (${best.ping}ms)")
-        if (DataStore.serviceState.canStop) {
-            SagerNet.reloadService()
-        }
     }
 
     /**

@@ -1456,13 +1456,14 @@ class ConfigurationFragment @JvmOverloads constructor(
                 // Drop this tab's whole entity set: the pager adapter
                 // keeps every visited tab in groupFragments forever,
                 // so without this the entities pile up unboundedly.
-                it.configurationList.clear()
-                it.configurationIdList.clear()
-                it.geoRows = emptyList()
+                it.clearAll()
             }
             runCatching {
                 if (::proxyGroup.isInitialized) {
-                    this@ConfigurationFragment.adapter.groupFragments.remove(proxyGroup.id)
+                    // GroupFragment is a plain nested class, not inner:
+                    // reach the pager through the parent fragment.
+                    (parentFragment as? ConfigurationFragment)
+                        ?.adapter?.groupFragments?.remove(proxyGroup.id)
                 }
             }
 
@@ -1480,6 +1481,13 @@ class ConfigurationFragment @JvmOverloads constructor(
 
             init {
                 setHasStableIds(true)
+            }
+
+            /** Release everything this tab holds onto (called on destroy). */
+            fun clearAll() {
+                configurationList.clear()
+                configurationIdList.clear()
+                geoRows = emptyList()
             }
 
             var configurationIdList: MutableList<Long> = mutableListOf()

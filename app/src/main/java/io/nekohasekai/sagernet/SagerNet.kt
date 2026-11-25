@@ -75,7 +75,7 @@ class SagerNet : Application(),
 
             runOnDefaultDispatcher {
                 PackageCache.register()
-                GeoStore.pruneOnStart(this)
+                GeoStore.pruneOnStart(this@SagerNet)
                 cleanWebview()
             }
         }

@@ -559,7 +559,6 @@ fun buildConfig(
                     outbounds = memberTags
                     url = "https://www.gstatic.com/generate_204"
                     tolerance = 50
-                    race = false
                 })
                 mainSelector.default_ = "lb-main"
                 mainSelector.outbounds =

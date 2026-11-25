@@ -27,6 +27,7 @@ import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.ktx.applyDefaultValues
 import io.nekohasekai.sagernet.ktx.onMainDispatcher
 import io.nekohasekai.sagernet.ktx.runOnDefaultDispatcher
+import io.nekohasekai.sagernet.ktx.runOnIoDispatcher
 import io.nekohasekai.sagernet.widget.ListListener
 import io.nekohasekai.sagernet.widget.OutboundPreference
 import kotlinx.parcelize.Parcelize
@@ -197,6 +198,8 @@ class GroupSettingsActivity(
     }
 
     @SuppressLint("CommitTransaction")
+    private val pageDb by lazy { SagerDatabase.newPageInstance() }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setSupportActionBar(findViewById(R.id.toolbar))
@@ -216,21 +219,28 @@ class GroupSettingsActivity(
         val editingId = intent.getLongExtra(EXTRA_GROUP_ID, 0L)
         DataStore.editingId = editingId
         if (supportFragmentManager.findFragmentById(R.id.settings) == null) {
-            runOnDefaultDispatcher {
-                if (editingId == 0L) {
-                    ProxyGroup().init()
-                } else {
-                    val entity = SagerDatabase.groupDao.getById(editingId)
-                    if (entity == null) {
-                        onMainDispatcher {
-                            finish()
+            runOnIoDispatcher {
+                val loaded = try {
+                    if (editingId == 0L) {
+                        ProxyGroup().init()
+                        true
+                    } else {
+                        val entity = pageDb.groupDao().getById(editingId)
+                        if (entity == null) {
+                            false
+                        } else {
+                            entity.init()
+                            true
                         }
-                        return@runOnDefaultDispatcher
                     }
-                    entity.init()
+                } catch (e: Exception) {
+                    false
                 }
-
                 onMainDispatcher {
+                    if (!loaded) {
+                        finish()
+                        return@onMainDispatcher
+                    }
                     // The bean load above runs on a background dispatcher; if the
                     // user already left this screen, the FragmentManager is gone
                     // and committing crashes with "FragmentManager has been
@@ -255,7 +265,7 @@ class GroupSettingsActivity(
         if (editingId == 0L) {
             GroupManager.createGroup(ProxyGroup().apply { serialize() })
         } else if (needSave()) {
-            val entity = SagerDatabase.groupDao.getById(DataStore.editingId)
+            val entity = pageDb.groupDao().getById(DataStore.editingId)
             if (entity == null) {
                 finish()
                 return
@@ -300,6 +310,7 @@ class GroupSettingsActivity(
     }
 
     override fun onDestroy() {
+        runCatching { pageDb.close() }
         DataStore.profileCacheStore.unregisterChangeListener(this)
         super.onDestroy()
     }

@@ -145,6 +145,8 @@ class ConfigurationFragment @JvmOverloads constructor(
 
     val alwaysShowAddress by lazy { DataStore.alwaysShowAddress }
 
+    private val pageDb by lazy { SagerDatabase.newPageInstance() }
+
     fun getCurrentGroupFragment(): GroupFragment? {
         return try {
             childFragmentManager.findFragmentByTag("f" + DataStore.selectedGroup) as GroupFragment?
@@ -302,6 +304,7 @@ class ConfigurationFragment @JvmOverloads constructor(
 
     override fun onDestroy() {
         DataStore.profileCacheStore.unregisterChangeListener(this)
+        runCatching { pageDb.close() }
 
         if (::adapter.isInitialized) {
             GroupManager.removeListener(adapter)
@@ -505,7 +508,7 @@ class ConfigurationFragment @JvmOverloads constructor(
 
             R.id.action_clear_traffic_statistics -> {
                 runOnDefaultDispatcher {
-                    val profiles = SagerDatabase.proxyDao.getByGroup(DataStore.currentGroupId())
+                    val profiles = pageDb.proxyDao().getByGroup(DataStore.currentGroupId())
                     val toClear = mutableListOf<ProxyEntity>()
                     if (profiles.isNotEmpty()) for (profile in profiles) {
                         if (profile.tx != 0L || profile.rx != 0L) {
@@ -530,7 +533,7 @@ class ConfigurationFragment @JvmOverloads constructor(
 
             R.id.action_connection_test_clear_results -> {
                 runOnDefaultDispatcher {
-                    val profiles = SagerDatabase.proxyDao.getByGroup(DataStore.currentGroupId())
+                    val profiles = pageDb.proxyDao().getByGroup(DataStore.currentGroupId())
                     val toClear = mutableListOf<ProxyEntity>()
                     if (profiles.isNotEmpty()) for (profile in profiles) {
                         if (profile.status != 0) {
@@ -548,7 +551,7 @@ class ConfigurationFragment @JvmOverloads constructor(
 
             R.id.action_connection_test_delete_unavailable -> {
                 runOnDefaultDispatcher {
-                    val profiles = SagerDatabase.proxyDao.getByGroup(DataStore.currentGroupId())
+                    val profiles = pageDb.proxyDao().getByGroup(DataStore.currentGroupId())
                     val toClear = mutableListOf<ProxyEntity>()
                     if (profiles.isNotEmpty()) for (profile in profiles) {
                         if (profile.status != 0 && profile.status != 1) {
@@ -600,7 +603,7 @@ class ConfigurationFragment @JvmOverloads constructor(
 
             R.id.action_remove_duplicate -> {
                 runOnDefaultDispatcher {
-                    val profiles = SagerDatabase.proxyDao.getByGroup(DataStore.currentGroupId())
+                    val profiles = pageDb.proxyDao().getByGroup(DataStore.currentGroupId())
                     val toClear = mutableListOf<ProxyEntity>()
                     val uniqueProxies = LinkedHashSet<Protocols.Deduplication>()
                     for (pf in profiles) {
@@ -779,7 +782,7 @@ class ConfigurationFragment @JvmOverloads constructor(
         val group = DataStore.currentGroup()
 
         val mainJob = runOnDefaultDispatcher {
-            val profilesList = SagerDatabase.proxyDao.getByGroup(group.id).filter {
+            val profilesList = pageDb.proxyDao().getByGroup(group.id).filter {
                 if (icmpPing) {
                     if (it.requireBean().canICMPing()) {
                         return@filter true
@@ -920,7 +923,7 @@ class ConfigurationFragment @JvmOverloads constructor(
         val group = DataStore.currentGroup()
 
         val mainJob = runOnDefaultDispatcher {
-            val allProfiles = SagerDatabase.proxyDao.getByGroup(group.id)
+            val allProfiles = pageDb.proxyDao().getByGroup(group.id)
             // With country sections, a manual test only covers
             // the sections currently expanded.
             val scope = adapter.groupFragments[group.id]?.adapter?.expandedProfileIds()
@@ -1034,13 +1037,13 @@ class ConfigurationFragment @JvmOverloads constructor(
                 val finished = withTimeoutOrNull(12_000L) {
                 for (attempt in 0 until 6) {
                     try {
-                        val fetched = ArrayList(SagerDatabase.groupDao.allGroups())
+                        val fetched = ArrayList(pageDb.groupDao().allGroups())
                         if (fetched.isEmpty()) {
                             SagerDatabase.groupDao.createGroup(ProxyGroup(ungrouped = true))
-                            fetched.addAll(SagerDatabase.groupDao.allGroups())
+                            fetched.addAll(pageDb.groupDao().allGroups())
                         }
                         fetched.find { it.ungrouped }?.let {
-                            if (SagerDatabase.proxyDao.countByGroup(it.id) == 0L) {
+                            if (pageDb.proxyDao().countByGroup(it.id) == 0L) {
                                 fetched.remove(it)
                             }
                         }
@@ -1169,7 +1172,7 @@ class ConfigurationFragment @JvmOverloads constructor(
 
         override suspend fun onRemoved(groupId: Long, profileId: Long) {
             val group = groupList.find { it.id == groupId } ?: return
-            if (group.ungrouped && SagerDatabase.proxyDao.countByGroup(groupId) == 0L) {
+            if (group.ungrouped && pageDb.proxyDao().countByGroup(groupId) == 0L) {
                 reload()
             }
         }
@@ -1179,6 +1182,8 @@ class ConfigurationFragment @JvmOverloads constructor(
 
         lateinit var proxyGroup: ProxyGroup
         var selected = false
+
+        private val pageDb by lazy { SagerDatabase.newPageInstance() }
 
         override fun onCreateView(
             inflater: LayoutInflater,
@@ -1451,6 +1456,7 @@ class ConfigurationFragment @JvmOverloads constructor(
             }
 
             super.onDestroy()
+            runCatching { pageDb.close() }
 
             if (!::undoManager.isInitialized) return
             undoManager.flush()
@@ -1892,7 +1898,7 @@ class ConfigurationFragment @JvmOverloads constructor(
 
             override suspend fun groupUpdated(groupId: Long) {
                 if (groupId != proxyGroup.id) return
-                proxyGroup = SagerDatabase.groupDao.getById(groupId)!!
+                proxyGroup = pageDb.groupDao().getById(groupId)!!
                 reloadProfiles()
             }
 
@@ -1950,9 +1956,9 @@ class ConfigurationFragment @JvmOverloads constructor(
                 val finished = withTimeoutOrNull(12_000L) {
                 for (attempt in 0 until 5) {
                     try {
-                        var fetched = SagerDatabase.proxyDao.getByGroup(proxyGroup.id)
+                        var fetched = pageDb.proxyDao().getByGroup(proxyGroup.id)
                         if (fetched.isEmpty() && attempt < 4 &&
-                            SagerDatabase.proxyDao.countByGroup(proxyGroup.id) > 0L
+                            pageDb.proxyDao().countByGroup(proxyGroup.id) > 0L
                         ) {
                             delay(300L)
                             continue

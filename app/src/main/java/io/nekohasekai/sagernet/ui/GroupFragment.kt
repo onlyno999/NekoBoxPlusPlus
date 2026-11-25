@@ -46,6 +46,8 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
     lateinit var groupAdapter: GroupAdapter
     lateinit var undoManager: UndoSnackbarManager<ProxyGroup>
 
+    private val pageDb by lazy { SagerDatabase.newPageInstance() }
+
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
         activity = requireActivity() as MainActivity
@@ -122,7 +124,7 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
                 MaterialAlertDialogBuilder(requireContext()).setTitle(R.string.confirm)
                     .setMessage(R.string.update_all_subscription)
                     .setPositiveButton(R.string.yes) { _, _ ->
-                        SagerDatabase.groupDao.allGroups()
+                        pageDb.groupDao().allGroups()
                             .filter { it.type == GroupType.SUBSCRIPTION }
                             .forEach {
                                 GroupUpdater.startUpdate(it, true)
@@ -141,7 +143,7 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
         registerForActivityResult(ActivityResultContracts.CreateDocument()) { data ->
             if (data != null) {
                 runOnDefaultDispatcher {
-                    val profiles = SagerDatabase.proxyDao.getByGroup(selectedGroup.id)
+                    val profiles = pageDb.proxyDao().getByGroup(selectedGroup.id)
                     val links = profiles.joinToString("\n") { it.toStdLink(compact = true) }
                     try {
                         (requireActivity() as MainActivity).contentResolver.openOutputStream(
@@ -180,10 +182,10 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
             val finished = withTimeoutOrNull(12_000L) {
             for (attempt in 0 until 5) {
                 try {
-                    val fetched = SagerDatabase.groupDao.allGroups().toMutableList()
+                    val fetched = pageDb.groupDao().allGroups().toMutableList()
                     val ungroupedId = fetched.find { it.ungrouped }?.id
                     if (fetched.size > 1 && ungroupedId != null &&
-                        SagerDatabase.proxyDao.countByGroup(ungroupedId) == 0L
+                        pageDb.proxyDao().countByGroup(ungroupedId) == 0L
                     ) fetched.removeAll { it.ungrouped }
                     loaded = fetched
                     break
@@ -296,7 +298,7 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
             if (index == -1) return
             onMainDispatcher {
                 undoManager.flush()
-                if (SagerDatabase.groupDao.allGroups().size <= 2) {
+                if (pageDb.groupDao().allGroups().size <= 2) {
                     runOnDefaultDispatcher {
                         reload()
                     }
@@ -371,6 +373,7 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
         }
 
         super.onDestroy()
+        runCatching { pageDb.close() }
 
         if (!::undoManager.isInitialized) return
         undoManager.flush()
@@ -411,7 +414,7 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
 
                 R.id.action_export_clipboard -> {
                     runOnDefaultDispatcher {
-                        val profiles = SagerDatabase.proxyDao.getByGroup(selectedGroup.id)
+                        val profiles = pageDb.proxyDao().getByGroup(selectedGroup.id)
                         val links = profiles.joinToString("\n") { it.toStdLink(compact = true) }
                         onMainDispatcher {
                             SagerNet.trySetPrimaryClip(links)
@@ -575,7 +578,7 @@ class GroupFragment : ToolbarFragment(R.layout.layout_group),
             groupUser.text = subscription?.username ?: ""
 
             runOnIoDispatcher {
-                val size = SagerDatabase.proxyDao.countByGroup(group.id)
+                val size = pageDb.proxyDao().countByGroup(group.id)
                 onMainDispatcher {
                     // The fragment may have detached (or this holder may have
                     // been rebound to another group) while the count query was

@@ -189,13 +189,13 @@ object ProfileManager {
         "playstoregatewayadapter-pa.googleapis.com,services.googleapis.cn," +
         "xn--ngstr-lra8j.com,play.googleapis.com,mtalk.google.com"
 
-    suspend fun getRules(): List<RuleEntity> {
+    suspend fun getRules(db: SagerDatabase = SagerDatabase.instance): List<RuleEntity> {
         // One-time upgrade of the upstream-seeded China trio on
         // existing installs: full Play Store domain list, all
         // three enabled, store rule ahead of the bypass rules.
         if (DataStore.rulesFirstCreate && !DataStore.nbppCnRulesV2) {
             DataStore.nbppCnRulesV2 = true
-            val existing = SagerDatabase.rulesDao.allRules()
+            val existing = db.rulesDao().allRules()
             val play = existing.firstOrNull { it.domains.contains("googleapis") && it.outbound == 0L }
             val dom = existing.firstOrNull { it.domains == "geosite:cn" && it.outbound == -1L }
             val ip = existing.firstOrNull { it.ip == "geoip:cn" && it.outbound == -1L }
@@ -228,7 +228,7 @@ object ProfileManager {
                 )
             }
         }
-        var rules = SagerDatabase.rulesDao.allRules()
+        var rules = db.rulesDao().allRules()
         if (rules.isEmpty() && !DataStore.rulesFirstCreate) {
             DataStore.rulesFirstCreate = true
             createRule(

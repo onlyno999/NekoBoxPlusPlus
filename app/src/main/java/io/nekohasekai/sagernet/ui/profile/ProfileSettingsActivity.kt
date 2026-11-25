@@ -87,7 +87,7 @@ abstract class ProfileSettingsActivity<T : AbstractBean>(
     abstract fun T.init()
     abstract fun T.serialize()
 
-    private val pageDb by lazy { SagerDatabase.newPageInstance() }
+    internal val pageDb by lazy { SagerDatabase.newPageInstance() }
     val proxyEntity by lazy { pageDb.proxyDao().getById(DataStore.editingId) }
     protected var isSubscription by Delegates.notNull<Boolean>()
 
@@ -365,7 +365,7 @@ abstract class ProfileSettingsActivity<T : AbstractBean>(
                     val ent = activity.proxyEntity!!
                     orientation = LinearLayout.VERTICAL
 
-                    pageDb.groupDao().allGroups()
+                    activity.pageDb.groupDao().allGroups()
                         .filter { it.type == GroupType.BASIC && it.id != ent.groupId }
                         .forEach { group ->
                             LayoutGroupItemBinding.inflate(layoutInflater, this, true).apply {

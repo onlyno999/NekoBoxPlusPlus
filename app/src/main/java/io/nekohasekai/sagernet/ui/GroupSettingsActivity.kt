@@ -200,6 +200,8 @@ class GroupSettingsActivity(
     private val pageDb by lazy { SagerDatabase.newPageInstance() }
 
     @SuppressLint("CommitTransaction")
+    private val pageDb by lazy { SagerDatabase.newPageInstance() }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setSupportActionBar(findViewById(R.id.toolbar))

@@ -2320,12 +2320,22 @@ class ConfigurationFragment @JvmOverloads constructor(
 
                 runOnDefaultDispatcher {
                     val selected = (selectedItem?.id ?: DataStore.selectedProxy) == proxyEntity.id
+                    // Auto mode locks no node: while this node's pool
+                    // is armed, the main line runs through the pool's
+                    // urltest group, so no member shows the selected
+                    // border. (The route-rule picker still shows its
+                    // pick, so this only applies outside select mode.)
+                    val poolArmed = !select && runCatching {
+                        GeoStore.countryFor(view.context, proxyEntity.requireBean())
+                    }.getOrNull()?.let { cc ->
+                        GroupBalancer.isArmed(view.context, proxyGroup.id, cc)
+                    } == true
                     val started =
                         selected && DataStore.serviceState.started && DataStore.currentProfile == proxyEntity.id
                     onMainDispatcher {
                         editButton.isEnabled = !started
                         removeButton.isEnabled = !started
-                        selectedView.visibility = if (selected) View.VISIBLE else View.INVISIBLE
+                        selectedView.visibility = if (selected && !poolArmed) View.VISIBLE else View.INVISIBLE
                     }
 
                     fun showShare(anchor: View) {

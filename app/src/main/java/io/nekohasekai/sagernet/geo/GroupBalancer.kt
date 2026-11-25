@@ -421,32 +421,25 @@ object GroupBalancer {
     }
 
     /**
-     * Arm-time steering, from records only: arming auto hands the
-     * main connection to the balancer, so the pool's best known
-     * member becomes the pick. A stale manual pick must not
-     * survive into auto mode just because it happens to sit in
-     * the same country — that leftover "lock" used to strand auto
-     * on a slow line while a faster one sat unused. Only when no
-     * node in the pool has any recorded speed at all is a healthy
-     * in-pool pick kept instead of jumping blind. (Standby rounds
-     * still never displace a working line; this is the arm-time
-     * handover only.)
+     * Arm-time steering, from records only: when the current
+     * selection sits outside the pool, move it onto the pool's
+     * best known member. A selection already inside the pool is
+     * left alone — standby rounds never displace a working line.
      */
     private suspend fun steerIntoPool(groupId: Long, cc: String) {
-        val best = withContext(Dispatchers.IO) {
-            bestKnown(app, groupId, cc)
-        } ?: return
-        val previous = DataStore.selectedProxy
-        if (best.id == previous) return
         val inside = withContext(Dispatchers.IO) {
             SagerDatabase.proxyDao.getByGroup(groupId)
         }.any {
-            it.id == previous &&
+            it.id == DataStore.selectedProxy &&
                 runCatching {
                     GeoStore.countryFor(app, it.requireBean())
                 }.getOrNull() == cc
         }
-        if (inside && best.ping <= 0) return
+        if (inside) return
+        val best = withContext(Dispatchers.IO) {
+            bestKnown(app, groupId, cc)
+        } ?: return
+        val previous = DataStore.selectedProxy
         DataStore.selectedProxy = best.id
         ProfileManager.postUpdate(previous)
         ProfileManager.postUpdate(best.id)

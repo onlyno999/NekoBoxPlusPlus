@@ -19,6 +19,7 @@ import androidx.core.content.getSystemService
 import go.Seq
 import io.nekohasekai.sagernet.bg.SagerConnection
 import io.nekohasekai.sagernet.database.DataStore
+import io.nekohasekai.sagernet.geo.GeoStore
 import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.ktx.isOss
 import io.nekohasekai.sagernet.ktx.isPreview
@@ -74,6 +75,7 @@ class SagerNet : Application(),
 
             runOnDefaultDispatcher {
                 PackageCache.register()
+                GeoStore.pruneOnStart(this)
                 cleanWebview()
             }
         }

@@ -5,6 +5,7 @@ import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.TypeConverters
+import androidx.sqlite.db.SupportSQLiteDatabase
 import dev.matrix.roomigrant.GenerateRoomMigrations
 import io.nekohasekai.sagernet.Key
 import io.nekohasekai.sagernet.SagerNet
@@ -71,6 +72,14 @@ abstract class SagerDatabase : RoomDatabase() {
                 .fallbackToDestructiveMigration()
                 .setQueryExecutor(java.util.concurrent.Executors.newCachedThreadPool())
                 .setTransactionExecutor(java.util.concurrent.Executors.newCachedThreadPool())
+                .addCallback(object : RoomDatabase.Callback() {
+                    override fun onOpen(db: SupportSQLiteDatabase) {
+                        // Default page cache is 2000 pages (~8MB cap per
+                        // connection); a full-table scan warms it up fast.
+                        // Cap each page instance at ~2MB.
+                        db.execSQL("PRAGMA cache_size = -2048")
+                    }
+                })
                 .build()
         }
 

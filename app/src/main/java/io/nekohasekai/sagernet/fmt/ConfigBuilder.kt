@@ -137,7 +137,15 @@ fun buildConfig(
                 else -> listOf()
             }
         }.toHashSet().toList()).associateBy { it.id }
-    val buildSelector = !forTest && group?.isSelector == true && !forExport
+    val armedLbPool =
+        io.nekohasekai.sagernet.geo.GroupBalancer.armedPair(SagerNet.application)
+    val armedMainPool = armedLbPool != null && group != null &&
+        armedLbPool.first == group.id &&
+        io.nekohasekai.sagernet.geo.GeoStore.countryFor(
+            SagerNet.application, proxy.requireBean()
+        ) == armedLbPool.second
+    val buildSelector = !forTest && !forExport &&
+        (group?.isSelector == true || armedMainPool)
     val userDNSRuleList = mutableListOf<DNSRule_DefaultOptions>()
     val domainListDNSDirectForce = mutableListOf<String>()
     val bypassDNSBeans = hashSetOf<AbstractBean>()
@@ -469,17 +477,20 @@ fun buildConfig(
         }
 
         // build outbounds
+        var selectorOptions: Outbound_SelectorOptions? = null
         if (buildSelector) {
             val list = group.id.let { SagerDatabase.proxyDao.getByGroup(it) }
             list.forEach {
                 tagMap[it.id] = buildChain(it.id, it)
             }
-            outbounds.add(0, Outbound_SelectorOptions().apply {
+            val selector = Outbound_SelectorOptions().apply {
                 type = "selector"
                 tag = TAG_PROXY
                 default_ = tagMap[proxy.id]
                 outbounds = tagMap.values.toList()
-            })
+            }
+            selectorOptions = selector
+            outbounds.add(0, selector)
         } else {
             buildChain(0, proxy)
         }
@@ -523,6 +534,36 @@ fun buildConfig(
                         tolerance = 50
                     })
                 }
+            }
+        }
+
+        // NekoBox++: the lit pool as a lowest-latency urltest group
+        // on the main line -- the selector's default becomes the
+        // urltest group, so every new connection goes to the pool's
+        // currently fastest member. Auto mode locks no single node.
+        // (The race edition sets race = true here for concurrent
+        // dialing instead.)
+        val mainSelector = selectorOptions
+        if (armedMainPool && mainSelector != null && armedLbPool != null) {
+            val memberTags = SagerDatabase.proxyDao.getByGroup(armedLbPool.first)
+                .filter {
+                    io.nekohasekai.sagernet.geo.GeoStore.countryFor(
+                        SagerNet.application, it.requireBean()
+                    ) == armedLbPool.second
+                }
+                .mapNotNull { tagMap[it.id] }
+            if (memberTags.size >= 2) {
+                outbounds.add(Outbound_URLTestOptions().apply {
+                    type = "urltest"
+                    tag = "lb-main"
+                    outbounds = memberTags
+                    url = "https://www.gstatic.com/generate_204"
+                    tolerance = 50
+                    race = false
+                })
+                mainSelector.default_ = "lb-main"
+                mainSelector.outbounds =
+                    (mainSelector.outbounds ?: emptyList()) + "lb-main"
             }
         }
 

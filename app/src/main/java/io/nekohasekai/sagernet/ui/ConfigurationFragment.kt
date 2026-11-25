@@ -2333,8 +2333,12 @@ class ConfigurationFragment @JvmOverloads constructor(
                     val started =
                         selected && DataStore.serviceState.started && DataStore.currentProfile == proxyEntity.id
                     onMainDispatcher {
-                        editButton.isEnabled = !started
-                        removeButton.isEnabled = !started
+                        // In auto mode the service runs on the pool's
+                        // urltest group, not on any single node, so the
+                        // single-node "started" guard must not grey out
+                        // edit/remove for pool members either.
+                        editButton.isEnabled = !started || poolArmed
+                        removeButton.isEnabled = !started || poolArmed
                         selectedView.visibility = if (selected && !poolArmed) View.VISIBLE else View.INVISIBLE
                     }
 

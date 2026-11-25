@@ -87,6 +87,13 @@ object GeoStore {
         }
     }
 
+    // Probes record one node at a time; writing the whole map to
+    // disk on every record churns the GC. At most one write per 15s;
+    // a crash loses at most one window of probe results, which are
+    // re-probed anyway.
+    private const val SAVE_DEBOUNCE_MS = 15_000L
+    private var lastSaveMs = 0L
+
     private fun save(context: Context) {
         synchronized(lock) {
             val mapJson = JSONObject()
@@ -127,15 +134,39 @@ object GeoStore {
         return System.currentTimeMillis() - ts < RETRY_MS
     }
 
+    // Deleted nodes leave stale entries behind forever; cap both
+    // maps and drop the oldest first (mutableMapOf keeps insertion
+    // order) so they stay bounded no matter how many nodes come and go.
+    private const val MAX_GEO_ENTRIES = 5000
+    private const val PRUNE_TO_ENTRIES = 4000
+
+    private fun pruneLocked(map: MutableMap<String, *>) {
+        if (map.size <= MAX_GEO_ENTRIES) return
+        val it = map.keys.iterator()
+        var drop = map.size - PRUNE_TO_ENTRIES
+        while (drop-- > 0 && it.hasNext()) {
+            it.next()
+            it.remove()
+        }
+    }
+
     fun record(context: Context, bean: AbstractBean, countryCode: String?) {
         val key = keyOf(bean)
         // Only stamp the 24h retry lock on success: a failed probe (storm
         // timeout, transient network) must stay retryable on the next round.
         if (!countryCode.isNullOrBlank()) {
             synchronized(lock) {
-                loadTry(context)[key] = System.currentTimeMillis()
-                loadMap(context)[key] = countryCode.uppercase()
-                save(context)
+                val tryMap = loadTry(context)
+                val map = loadMap(context)
+                tryMap[key] = System.currentTimeMillis()
+                map[key] = countryCode.uppercase()
+                pruneLocked(tryMap)
+                pruneLocked(map)
+                val now = System.currentTimeMillis()
+                if (now - lastSaveMs >= SAVE_DEBOUNCE_MS) {
+                    lastSaveMs = now
+                    save(context)
+                }
             }
         }
     }

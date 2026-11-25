@@ -1453,6 +1453,17 @@ class ConfigurationFragment @JvmOverloads constructor(
             adapter?.let {
                 ProfileManager.removeListener(it)
                 GroupManager.removeListener(it)
+                // Drop this tab's whole entity set: the pager adapter
+                // keeps every visited tab in groupFragments forever,
+                // so without this the entities pile up unboundedly.
+                it.configurationList.clear()
+                it.configurationIdList.clear()
+                it.geoRows = emptyList()
+            }
+            runCatching {
+                if (::proxyGroup.isInitialized) {
+                    this@ConfigurationFragment.adapter.groupFragments.remove(proxyGroup.id)
+                }
             }
 
             super.onDestroy()

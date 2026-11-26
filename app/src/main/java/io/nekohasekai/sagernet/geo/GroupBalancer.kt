@@ -646,10 +646,15 @@ object GroupBalancer {
             val batch = (0 until minOf(BATCH_SIZE, members.size))
                 .map { members[(startIdx + it) % members.size] }
             Log.i(TAG, "standby batch for $cc: ${batch.size} of ${members.size} profiles")
-            withContext(Dispatchers.IO) {
+            val answered = withContext(Dispatchers.IO) {
                 batch.map { profile ->
-                    async { runCatching { testPing(profile) } }
-                }.awaitAll()
+                    async { profile to runCatching { testPing(profile) }.getOrDefault(false) }
+                }.awaitAll().filter { it.second }.map { it.first }
+            }
+            // Same rule as a manual test: every node that answered
+            // gets its region re-detected, even ones already filed.
+            if (answered.isNotEmpty()) {
+                GeoProbe.probeProfiles(app, answered)
             }
             prefs.edit().putLong(cursorKey, batch.last().id).apply()
         } catch (e: Exception) {

@@ -979,14 +979,13 @@ class ConfigurationFragment @JvmOverloads constructor(
                 }
                 GroupManager.postReload(DataStore.currentGroupId())
                 DataStore.runningTest = false
-                // Region follow-up: detect the region of every node
-                // that answered, filing each into its country
-                // section as soon as it is known.
+                // Region follow-up: re-detect the region of every
+                // node that answered, even ones already filed —
+                // exits move, and the network-change auto sweep
+                // may not have run, so a manual test always
+                // re-files each node into its real country section.
                 val appCtx = dialog.context.applicationContext
-                val geoTargets = test.results.filter {
-                    it.status == 1 &&
-                        GeoStore.countryFor(appCtx, it.requireBean()) == null
-                }
+                val geoTargets = test.results.filter { it.status == 1 }
                 if (geoTargets.isNotEmpty()) {
                     launch {
                         var lastReload = 0L

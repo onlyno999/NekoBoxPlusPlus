@@ -10,7 +10,7 @@ import (
 // with a lazier GC percent below the cap, so the core does not
 // grow unbounded in the background. Ported from Nekobox-Next.
 func ConfigureBackgroundRuntime() {
-	debug.SetMemoryLimit(120 << 20)
+	debug.SetMemoryLimit(200 << 20)
 	debug.SetGCPercent(150)
 }
 
